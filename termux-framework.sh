@@ -2,7 +2,7 @@
 
 # ========================================
 # Termux集成脚本框架
-# 版本：1.0.3
+# 版本：1.0.4
 # ========================================
 
 # 颜色定义
@@ -19,7 +19,7 @@ SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
 REPO_URL="https://github.com/Ambition-io/termux-framework.git"
-VERSION="1.0.3"
+VERSION="1.0.4"
 
 # 确保目录存在
 mkdir -p "$SCRIPTS_DIR"
@@ -41,6 +41,9 @@ CHECK_UPDATE_DAYS=7
 
 # 上次检查更新时间
 LAST_UPDATE_CHECK=0
+
+# 快捷名称
+SHORTCUT_NAME="termux-framework"
 EOF
     chmod +x "$CONFIG_FILE"
 fi
@@ -59,22 +62,22 @@ print_title() {
 
 # 打印信息
 print_info() {
-    echo -e "${BLUE}[信息]${RESET} $1"
+    echo -e "${BLUE}[信息]${RESET} \$1"
 }
 
 # 打印成功
 print_success() {
-    echo -e "${GREEN}[成功]${RESET} $1"
+    echo -e "${GREEN}[成功]${RESET} \$1"
 }
 
 # 打印警告
 print_warning() {
-    echo -e "${YELLOW}[警告]${RESET} $1"
+    echo -e "${YELLOW}[警告]${RESET} \$1"
 }
 
 # 打印错误
 print_error() {
-    echo -e "${RED}[错误]${RESET} $1"
+    echo -e "${RED}[错误]${RESET} \$1"
 }
 
 # 按键继续
@@ -122,6 +125,23 @@ configure_git_for_public_repos() {
             print_info "已将仓库URL从SSH格式转换为HTTPS格式"
         fi
     fi
+}
+
+# 更新框架快捷链接
+update_framework_shortcut() {
+    # 如果旧快捷链接存在且不同于新名称，先移除
+    if [ -n "\$1" ] && [ "\$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/\$1" ]; then
+        rm -f "$PREFIX/bin/\$1"
+    fi
+    
+    # 创建快捷链接
+    cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+exec "$SCRIPT_DIR/termux-framework.sh" "\$@"
+EOF
+    chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
+    
+    print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
 }
 
 # 更新框架
@@ -381,7 +401,7 @@ pull_repository_scripts() {
 
 # 执行选定的脚本
 execute_script() {
-    local script="$1"
+    local script="\$1"
     
     if [ -f "$script" ] && [ -x "$script" ]; then
         print_info "执行脚本: $(basename "$script")"
@@ -497,8 +517,14 @@ uninstall_framework() {
     cat > "$temp_script" << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
+# 获取配置文件中的快捷名称
+SHORTCUT_NAME=$(grep -m 1 "^SHORTCUT_NAME=" "$HOME/.termux-framework/config.sh" | cut -d'"' -f2)
+if [ -z "$SHORTCUT_NAME" ]; then
+    SHORTCUT_NAME="termux-framework"
+fi
+
 # 清理符号链接
-rm -f "$PREFIX/bin/termux-framework"
+rm -f "$PREFIX/bin/$SHORTCUT_NAME"
 
 # 删除框架目录
 rm -rf "$HOME/.termux-framework"
@@ -509,7 +535,7 @@ echo ""
 echo "感谢您使用本框架！"
 
 # 删除临时脚本（自己）
-rm -f "$0"
+rm -f "\$0"
 EOF
     
     chmod +x "$temp_script"
@@ -531,6 +557,9 @@ first_run() {
         
         # 配置Git以使用HTTPS且不提示认证
         configure_git_for_public_repos
+        
+        # 更新框架快捷链接
+        update_framework_shortcut
         
         # 设置初始化完成标记
         touch "$SCRIPT_DIR/.initialized"
@@ -886,10 +915,11 @@ config_management() {
     echo "1) 修改仓库URL"
     echo "2) 设置自动更新检查周期"
     echo "3) 恢复默认配置"
+    echo "4) 自定义框架快捷名称"  # 新增选项
     echo "0) 返回上一级菜单"
     echo ""
     
-    read -p "请选择 [0-3]: " choice
+    read -p "请选择 [0-4]: " choice  # 更新选项数量
     
     case $choice in
         1)
@@ -935,12 +965,37 @@ CHECK_UPDATE_DAYS=7
 
 # 上次检查更新时间
 LAST_UPDATE_CHECK=0
+
+# 快捷名称
+SHORTCUT_NAME="termux-framework"
 EOF
                 chmod +x "$CONFIG_FILE"
                 
                 print_success "配置已重置为默认值"
                 print_info "原配置已备份为 $CONFIG_FILE.bak"
             fi
+            ;;
+        4)
+            echo "当前快捷名称: $SHORTCUT_NAME"
+            read -p "请输入新的快捷名称 (留空使用默认值'termux-framework'): " new_name
+            
+            if [ -z "$new_name" ]; then
+                new_name="termux-framework"
+            fi
+            
+            # 保存旧快捷名称
+            local old_shortcut="$SHORTCUT_NAME"
+            
+            # 更新配置
+            sed -i "s|SHORTCUT_NAME=.*|SHORTCUT_NAME=\"$new_name\"|" "$CONFIG_FILE"
+            
+            # 重新加载配置
+            source "$CONFIG_FILE"
+            
+            # 更新快捷链接
+            update_framework_shortcut "$old_shortcut"
+            
+            print_success "快捷名称已更新为: $new_name"
             ;;
         0)
             return
