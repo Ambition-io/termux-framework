@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
 # Termux集成脚本框架
-VERSION="1.0.4"
+VERSION="1.0.5"
 
 # 颜色定义
 RED="\033[31m"
