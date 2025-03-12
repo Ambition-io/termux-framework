@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
 # ========================================
-# Termux集成脚本框架安装程序
+# Termux集成脚本框架安装程序 1.0.1
 # ========================================
 
 # 颜色定义
@@ -84,11 +84,29 @@ main() {
     # 克隆仓库
     print_info "正在克隆仓库..."
     if git clone "$REPO_URL" "$SCRIPT_DIR"; then
-        # 设置执行权限
+        # 设置执行权限 - 确保这一行执行成功
+        print_info "设置执行权限..."
         chmod +x "$SCRIPT_DIR/termux-framework.sh"
         
-        # 创建快捷方式
-        ln -sf "$SCRIPT_DIR/termux-framework.sh" "$PREFIX/bin/termux-framework"
+        # 添加调试信息
+        print_info "检查文件是否存在:"
+        ls -la "$SCRIPT_DIR/termux-framework.sh" || print_error "文件不存在!"
+        
+        # 创建快捷方式，增加错误处理
+        if [ -n "$PREFIX" ]; then
+            if [ -d "$PREFIX/bin" ]; then
+                print_info "创建命令快捷方式..."
+                ln -sf "$SCRIPT_DIR/termux-framework.sh" "$PREFIX/bin/termux-framework"
+                chmod +x "$PREFIX/bin/termux-framework"
+                print_success "快捷方式已创建，可以通过命令'termux-framework'来启动"
+            else
+                print_warning "目录 $PREFIX/bin 不存在，无法创建快捷方式"
+                print_info "您可以通过直接运行 $SCRIPT_DIR/termux-framework.sh 来启动框架"
+            fi
+        else
+            print_warning "环境变量 PREFIX 未定义，无法创建快捷方式"
+            print_info "您可以通过直接运行 $SCRIPT_DIR/termux-framework.sh 来启动框架"
+        fi
         
         print_success "安装完成！"
         echo ""
@@ -99,7 +117,16 @@ main() {
         # 询问是否立即启动
         read -p "是否立即启动框架? (y/n): " start
         if [[ "$start" =~ ^[Yy]$ ]]; then
-            exec "$SCRIPT_DIR/termux-framework.sh"
+            # 使用bash执行而不是exec
+            if [ -f "$SCRIPT_DIR/termux-framework.sh" ]; then
+                print_info "启动框架..."
+                bash "$SCRIPT_DIR/termux-framework.sh"
+            else
+                print_error "框架主脚本不存在: $SCRIPT_DIR/termux-framework.sh"
+                print_info "目录内容:"
+                ls -la "$SCRIPT_DIR"
+                exit 1
+            fi
         fi
     else
         print_error "克隆仓库失败，请检查网络连接和仓库URL"
