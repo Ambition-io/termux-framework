@@ -1117,7 +1117,7 @@ remove_pinned_plugin() {
         print_warning "没有找到有效的固定插件"
         press_enter
         return
-    }
+    fi
     
     echo "0) 返回上一级菜单"
     echo ""
