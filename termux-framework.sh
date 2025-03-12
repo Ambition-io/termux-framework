@@ -1,11 +1,13 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
+# Termux集成脚本框架
+VERSION="1.0.4"
+
 # 颜色定义
 RED="\033[31m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
 BLUE="\033[34m"
-MAGENTA="\033[35m"
 CYAN="\033[36m"
 RESET="\033[0m"
 
@@ -14,24 +16,17 @@ SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
 REPO_URL="https://github.com/Ambition-io/termux-framework.git"
-VERSION="1.0.4"
 
 # 确保目录存在
 mkdir -p "$SCRIPTS_DIR"
 
-# 创建配置文件
+# 创建配置文件（如果不存在）
 if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # 配置文件
-
-# 仓库URL
 REPO_URL="$REPO_URL"
-
-# 默认镜像源
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
-
-# 快捷名称
 SHORTCUT_NAME="termux-framework"
 EOF
     chmod +x "$CONFIG_FILE"
@@ -49,25 +44,11 @@ print_title() {
     echo ""
 }
 
-# 打印信息
-print_info() {
-    echo -e "${BLUE}[信息]${RESET} $1"
-}
-
-# 打印成功
-print_success() {
-    echo -e "${GREEN}[成功]${RESET} $1"
-}
-
-# 打印警告
-print_warning() {
-    echo -e "${YELLOW}[警告]${RESET} $1"
-}
-
-# 打印错误
-print_error() {
-    echo -e "${RED}[错误]${RESET} $1"
-}
+# 打印信息、成功、警告和错误消息
+print_info() { echo -e "${BLUE}[信息]${RESET} $1"; }
+print_success() { echo -e "${GREEN}[成功]${RESET} $1"; }
+print_warning() { echo -e "${YELLOW}[警告]${RESET} $1"; }
+print_error() { echo -e "${RED}[错误]${RESET} $1"; }
 
 # 按键继续
 press_enter() {
@@ -75,7 +56,7 @@ press_enter() {
     read -p "按 Enter 键继续..."
 }
 
-# 检查必要的命令
+# 检查必要的命令是否安装
 check_dependencies() {
     local deps=("git" "curl" "wget")
     local missing=()
@@ -99,8 +80,8 @@ check_dependencies() {
     fi
 }
 
-# 配置Git使用HTTPS
-configure_git_for_public_repos() {
+# 配置Git以使用HTTPS
+configure_git() {
     if command -v git &> /dev/null; then
         git config --global core.askPass ""
         git config --global credential.helper ""
@@ -156,10 +137,10 @@ scan_scripts() {
 switch_mirror() {
     print_title
     echo -e "${CYAN}选择Termux软件源:${RESET}\n"
-    echo "1) 清华大学镜像源"
+    echo "1) 清华大学镜像源 (国内推荐)"
     echo "2) 阿里云镜像源"
     echo "3) 中科大镜像源"
-    echo "4) 官方源"
+    echo "4) 官方源 (国际)"
     echo "5) 自定义源"
     echo "0) 返回主菜单"
     
@@ -171,9 +152,7 @@ switch_mirror() {
         2) mirror="https://mirrors.aliyun.com/termux" ;;
         3) mirror="https://mirrors.ustc.edu.cn/termux" ;;
         4) mirror="https://packages.termux.dev/apt/termux-main" ;;
-        5)
-            read -p "请输入自定义镜像源URL: " mirror
-            ;;
+        5) read -p "请输入自定义镜像源URL: " mirror ;;
         0) return ;;
         *) 
             print_error "无效选项"
@@ -211,8 +190,8 @@ update_termux() {
 install_basic_environment() {
     while true; do
         print_title
-        echo -e "${YELLOW}基本环境安装选项:${RESET}"
-        echo "1) 安装基本工具"
+        echo -e "${YELLOW}基本环境安装:${RESET}"
+        echo "1) 安装所有基本工具 (git, curl, wget, python, openssh, vim, nano)"
         echo "2) 安装 Git"
         echo "3) 安装 Curl"
         echo "4) 安装 Wget"
@@ -227,49 +206,49 @@ install_basic_environment() {
         
         case $choice in
             1) 
-                print_info "正在安装所有基本工具..."
+                print_info "安装所有基本工具..."
                 pkg update -y
                 pkg install -y git curl wget python openssh vim nano
                 print_success "所有基本工具安装完成"
                 ;;
             2)
-                print_info "正在安装 Git..."
+                print_info "安装 Git..."
                 pkg update -y
                 pkg install -y git
                 print_success "Git 安装完成"
                 ;;
             3)
-                print_info "正在安装 Curl..."
+                print_info "安装 Curl..."
                 pkg update -y
                 pkg install -y curl
                 print_success "Curl 安装完成"
                 ;;
             4)
-                print_info "正在安装 Wget..."
+                print_info "安装 Wget..."
                 pkg update -y
                 pkg install -y wget
                 print_success "Wget 安装完成"
                 ;;
             5)
-                print_info "正在安装 Python..."
+                print_info "安装 Python..."
                 pkg update -y
                 pkg install -y python
                 print_success "Python 安装完成"
                 ;;
             6)
-                print_info "正在安装 OpenSSH..."
+                print_info "安装 OpenSSH..."
                 pkg update -y
                 pkg install -y openssh
                 print_success "OpenSSH 安装完成"
                 ;;
             7)
-                print_info "正在安装 Vim..."
+                print_info "安装 Vim..."
                 pkg update -y
                 pkg install -y vim
                 print_success "Vim 安装完成"
                 ;;
             8)
-                print_info "正在安装 Nano..."
+                print_info "安装 Nano..."
                 pkg update -y
                 pkg install -y nano
                 print_success "Nano 安装完成"
@@ -289,7 +268,7 @@ install_basic_environment() {
 # 拉取仓库脚本
 pull_repository_scripts() {
     print_title
-    print_info "正在从仓库拉取脚本..."
+    print_info "从仓库拉取脚本..."
     
     if [ -d "$SCRIPTS_DIR/.git" ]; then
         cd "$SCRIPTS_DIR"
@@ -427,29 +406,29 @@ uninstall_framework() {
         return
     fi
     
-    read -p "再次确认卸载? 此操作无法撤销 (yes/no): " confirm2
-    if [[ ! "$confirm2" == "yes" ]]; then
-        print_warning "卸载已取消"
-        press_enter
-        uninstall_menu
-        return
-    fi
-    
+    # 创建临时脚本来完成卸载
     local temp_script="/data/data/com.termux/files/usr/tmp/uninstall_framework_$.sh"
     
     cat > "$temp_script" << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
+# 获取配置文件中的快捷名称
 SHORTCUT_NAME=$(grep -m 1 "^SHORTCUT_NAME=" "$HOME/.termux-framework/config.sh" | cut -d'"' -f2)
 if [ -z "$SHORTCUT_NAME" ]; then
     SHORTCUT_NAME="termux-framework"
 fi
 
+# 清理符号链接
 rm -f "$PREFIX/bin/$SHORTCUT_NAME"
+
+# 删除框架目录
 rm -rf "$HOME/.termux-framework"
+
 echo -e "\033[32m[成功]\033[0m Termux集成脚本框架已成功卸载"
 echo ""
 echo "感谢您使用本框架！"
+
+# 删除临时脚本
 rm -f "$0"
 EOF
     
@@ -460,14 +439,14 @@ EOF
     exit 0
 }
 
-# 首次运行设置
+# 检查是否是首次运行
 first_run() {
     if [ ! -f "$SCRIPT_DIR/.initialized" ]; then
         print_title
         print_info "首次运行设置..."
         
         check_dependencies
-        configure_git_for_public_repos
+        configure_git
         update_framework_shortcut
         
         touch "$SCRIPT_DIR/.initialized"
@@ -482,7 +461,7 @@ manage_script_repository() {
         echo "1) 拉取最新脚本"
         echo "2) 固定脚本到主菜单"
         echo "3) 取消固定脚本"
-        echo "4) 为脚本创建快捷名称"
+        echo "4) 为脚本创建快捷命令"
         echo "5) 查看已固定脚本"
         echo "0) 返回主菜单"
         echo ""
@@ -623,7 +602,7 @@ view_pinned_scripts() {
 # 为脚本创建快捷命令
 create_script_shortcut() {
     print_title
-    echo -e "${YELLOW}为脚本创建快捷名称:${RESET}"
+    echo -e "${YELLOW}为脚本创建快捷命令:${RESET}"
     
     local scripts=($(scan_scripts))
     if [ ${#scripts[@]} -eq 0 ]; then
@@ -661,7 +640,7 @@ create_script_shortcut() {
         local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
         
         if command -v "$shortcut_name" &> /dev/null; then
-            print_warning "命令 '$shortcut_name' 已存在于系统中，可能会导致冲突"
+            print_warning "命令 '$shortcut_name' 已存在，可能会导致冲突。"
             read -p "是否继续? (y/n): " continue_anyway
             if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
                 print_warning "快捷命令创建已取消"
@@ -674,6 +653,9 @@ create_script_shortcut() {
         
         cat > "$PREFIX/bin/$shortcut_name" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
+# 脚本快捷方式
+# 目标: $abs_script_path
+
 cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
 EOF
         chmod +x "$PREFIX/bin/$shortcut_name"
@@ -693,8 +675,8 @@ EOF
 settings_menu() {
     while true; do
         print_title
-        echo -e "${YELLOW}设置选项:${RESET}"
-        echo "1) 查看当前版本信息"
+        echo -e "${YELLOW}设置:${RESET}"
+        echo "1) 查看版本信息"
         echo "2) 卸载功能"
         echo "3) 配置管理"
         echo "0) 返回主菜单"
@@ -772,14 +754,8 @@ config_management() {
                 cat > "$CONFIG_FILE" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 # 配置文件
-
-# 仓库URL
 REPO_URL="$REPO_URL"
-
-# 默认镜像源
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
-
-# 快捷名称
 SHORTCUT_NAME="termux-framework"
 EOF
                 chmod +x "$CONFIG_FILE"
@@ -796,7 +772,7 @@ EOF
             fi
             
             if command -v "$new_name" &> /dev/null && [ "$new_name" != "$SHORTCUT_NAME" ]; then
-                print_warning "命令 '$new_name' 已存在于系统中，可能会导致冲突"
+                print_warning "命令 '$new_name' 已存在，可能会导致冲突。"
                 read -p "是否继续? (y/n): " continue_anyway
                 if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
                     print_warning "快捷名称修改已取消"
@@ -827,19 +803,16 @@ EOF
     press_enter
 }
 
-# 显示主菜单
+# 主菜单
 main_menu() {
-    # 显示固定脚本的初始编号
-    local next_num=9
-    
     while true; do
         print_title
-        echo -e "${YELLOW}主菜单:${RESET}"
-        echo "1) 更新Termux环境"
-        echo "2) 切换软件源"
-        echo "3) 基本环境安装"
-        echo "4) 脚本仓库管理"
-        echo "5) 查看脚本"
+        echo -e "${CYAN}主菜单:${RESET}"
+        echo "1) 切换软件源"
+        echo "2) 更新Termux环境"
+        echo "3) 安装基本环境"
+        echo "4) 脚本管理"
+        echo "5) 执行脚本"
         echo "6) 设置"
         echo "0) 退出"
         echo ""
@@ -847,84 +820,90 @@ main_menu() {
         # 显示已固定的脚本
         local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
         if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
-            echo -e "${CYAN}固定脚本:${RESET}"
-            local i=$next_num
-            declare -A pinned_scripts
-            
+            echo -e "${YELLOW}已固定的脚本:${RESET}"
+            local pinned_count=0
             while IFS=: read -r script_path display_name; do
                 if [ -f "$script_path" ] && [ -x "$script_path" ]; then
-                    echo "$i) $display_name"
-                    pinned_scripts[$i]="$script_path"
-                    ((i++))
+                    ((pinned_count++))
+                    echo "$((pinned_count+6))) $display_name"
                 fi
             done < "$pinned_file"
-            
             echo ""
         fi
         
-        read -p "请选择 [0-$((i-1))]: " choice
+        read -p "请选择 [0-6"
+        if [ "$pinned_count" -gt 0 ]; then
+            echo -n "-$((pinned_count+6))"
+        fi
+        echo -n "]: "
+        read choice
         
         case $choice in
-            1) update_termux ;;
-            2) switch_mirror ;;
+            1) switch_mirror ;;
+            2) update_termux ;;
             3) install_basic_environment ;;
             4) manage_script_repository ;;
-            5) scripts_menu ;;
-            6) settings_menu ;;
-            0) 
-                clear
-                echo -e "${GREEN}感谢使用 Termux 集成脚本框架！${RESET}"
+            5) 
+                scripts=($(scan_scripts))
+                if [ ${#scripts[@]} -eq 0 ]; then
+                    print_warning "没有找到可执行的脚本"
+                    press_enter
+                    continue
+                fi
+                
+                print_title
+                echo -e "${YELLOW}可用脚本:${RESET}"
+                
+                local i=1
+                declare -A script_map
+                
+                for script_info in "${scripts[@]}"; do
+                    IFS=':' read -r script_path script_desc <<< "$script_info"
+                    echo "$i) $script_desc"
+                    script_map[$i]="$script_path"
+                    ((i++))
+                done
+                
+                echo "0) 返回主菜单"
                 echo ""
-                exit 0 
-                ;;
-            *) 
-                # 检查是否是固定脚本选项
-                if [[ $choice -ge $next_num && $choice -lt $i ]]; then
-                    execute_script "${pinned_scripts[$choice]}"
+                
+                read -p "请选择要执行的脚本 [0-$((i-1))]: " script_choice
+                
+                if [[ $script_choice -eq 0 ]]; then
+                    continue
+                elif [[ $script_choice -ge 1 && $script_choice -lt $i ]]; then
+                    execute_script "${script_map[$script_choice]}"
                 else
                     print_error "无效选项"
                     press_enter
                 fi
                 ;;
+            6) settings_menu ;;
+            0) exit 0 ;;
+            *)
+                # 检查是否选择了固定脚本
+                if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
+                    local pinned_index=$((choice-6))
+                    if [ $pinned_index -ge 1 ] && [ $pinned_index -le $pinned_count ]; then
+                        local j=0
+                        while IFS=: read -r script_path display_name; do
+                            if [ -f "$script_path" ] && [ -x "$script_path" ]; then
+                                ((j++))
+                                if [ $j -eq $pinned_index ]; then
+                                    execute_script "$script_path"
+                                    break
+                                fi
+                            fi
+                        done < "$pinned_file"
+                        continue
+                    fi
+                fi
+                
+                print_error "无效选项"
+                press_enter
+                ;;
         esac
     done
-}
-
-# 脚本菜单
-scripts_menu() {
-    print_title
-    echo -e "${YELLOW}可用脚本:${RESET}"
-    
-    local scripts=($(scan_scripts))
-    if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可用的脚本，请使用'脚本仓库管理'功能拉取脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A script_map
-    
-    for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc"
-        script_map[$i]="$script_path"
-        ((i++))
-    done
-    
-    echo "0) 返回主菜单"
-    echo ""
-    
-    read -p "请选择 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        execute_script "${script_map[$choice]}"
-    else
-        print_error "无效选项"
-        press_enter
-    fi
 }
 
 # 主程序
