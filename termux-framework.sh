@@ -36,12 +36,6 @@ REPO_URL="$REPO_URL"
 # 默认镜像源（清华大学镜像）
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
 
-# 自动检查更新（天数）
-CHECK_UPDATE_DAYS=7
-
-# 上次检查更新时间
-LAST_UPDATE_CHECK=0
-
 # 快捷名称
 SHORTCUT_NAME="termux-framework"
 EOF
@@ -142,54 +136,6 @@ EOF
     chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
     
     print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
-}
-
-# 更新框架
-update_framework() {
-    print_info "正在更新框架..."
-    
-    # 备份当前目录
-    local backup_dir="$SCRIPT_DIR.backup"
-    if [ -d "$SCRIPT_DIR/.git" ]; then
-        cd "$SCRIPT_DIR"
-        
-        # 保存当前配置
-        cp "$CONFIG_FILE" /tmp/termux_framework_config.tmp
-        
-        # 确保使用HTTPS协议且不提示认证
-        git config --local core.askPass ""
-        git config --local credential.helper ""
-        
-        # 获取仓库URL并确保使用HTTPS
-        local current_remote=$(git config --get remote.origin.url)
-        if [[ "$current_remote" == git@* ]]; then
-            # 转换SSH格式到HTTPS格式
-            local https_url=$(echo "$current_remote" | sed -e 's|git@github.com:|https://github.com/|')
-            git remote set-url origin "$https_url"
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-        fi
-        
-        # 获取最新代码，不提示认证
-        if GIT_TERMINAL_PROMPT=0 git pull; then
-            # 恢复配置（但保留可能的新设置）
-            if [ -f /tmp/termux_framework_config.tmp ]; then
-                source /tmp/termux_framework_config.tmp
-                # 更新配置文件中的版本号但保留用户设置
-                sed -i "s/VERSION=.*/VERSION=\"$VERSION\"/" "$CONFIG_FILE"
-                rm /tmp/termux_framework_config.tmp
-            fi
-            
-            print_success "框架更新成功"
-            exec "$SCRIPT_DIR/termux-framework.sh"
-            exit 0
-        else
-            print_error "更新失败，请检查网络连接或仓库权限"
-        fi
-    else
-        print_error "未找到Git仓库信息，无法更新"
-    fi
-    
-    press_enter
 }
 
 # 扫描可用脚本
@@ -781,20 +727,18 @@ settings_menu() {
     while true; do
         print_title
         echo -e "${YELLOW}设置选项:${RESET}"
-        echo "1) 框架更新"
-        echo "2) 查看当前版本信息"
-        echo "3) 卸载功能"
-        echo "4) 配置管理"
+        echo "1) 查看当前版本信息"
+        echo "2) 卸载功能"
+        echo "3) 配置管理"
         echo "0) 返回主菜单"
         echo ""
         
-        read -p "请选择 [0-4]: " choice
+        read -p "请选择 [0-3]: " choice
         
         case $choice in
-            1) framework_update_menu ;;
-            2) show_version_info ;;
-            3) uninstall_menu ;;
-            4) config_management ;;
+            1) show_version_info ;;
+            2) uninstall_menu ;;
+            3) config_management ;;
             0) return ;;
             *) 
                 print_error "无效选项"
@@ -802,80 +746,6 @@ settings_menu() {
                 ;;
         esac
     done
-}
-
-# 框架更新菜单（包含版本控制）
-framework_update_menu() {
-    print_title
-    echo -e "${YELLOW}框架更新选项:${RESET}"
-    
-    # 检查最新版本
-    print_info "正在检查最新版本..."
-    
-    # 创建临时目录
-    local tmp_dir=$(mktemp -d)
-    
-    # 确保REPO_URL使用HTTPS
-    if [[ "$REPO_URL" == git@* ]]; then
-        REPO_URL=$(echo "$REPO_URL" | sed -e 's|git@github.com:|https://github.com/|')
-        sed -i "s|REPO_URL=.*|REPO_URL=\"$REPO_URL\"|" "$CONFIG_FILE"
-        print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-    fi
-    
-    # 克隆仓库以检查版本，不提示认证
-    if GIT_TERMINAL_PROMPT=0 git clone --depth=1 "$REPO_URL" "$tmp_dir" &>/dev/null; then
-        # 从克隆的仓库中提取版本
-        local latest_version=$(grep "^VERSION=" "$tmp_dir/termux-framework.sh" | cut -d'"' -f2)
-        
-        echo "当前版本: $VERSION"
-        echo "最新版本: $latest_version"
-        echo ""
-        
-        # 比较版本
-        if [ "$VERSION" != "$latest_version" ]; then
-            echo "1) 更新到最新版本"
-            echo "2) 查看更新日志"
-            echo "0) 返回上一级菜单"
-            echo ""
-            
-            read -p "请选择 [0-2]: " choice
-            
-            case $choice in
-                1) 
-                    rm -rf "$tmp_dir"
-                    update_framework
-                    ;;
-                2)
-                    # 如果有更新日志则显示
-                    if [ -f "$tmp_dir/CHANGELOG.md" ]; then
-                        print_title
-                        echo -e "${YELLOW}更新日志:${RESET}"
-                        cat "$tmp_dir/CHANGELOG.md"
-                    else
-                        print_warning "未找到更新日志"
-                    fi
-                    press_enter
-                    ;;
-                0)
-                    rm -rf "$tmp_dir"
-                    return
-                    ;;
-                *)
-                    print_error "无效选项"
-                    press_enter
-                    ;;
-            esac
-        else
-            print_success "您已经使用的是最新版本"
-            press_enter
-        fi
-    else
-        print_error "无法连接到远程仓库检查更新"
-        press_enter
-    fi
-    
-    # 清理
-    rm -rf "$tmp_dir"
 }
 
 # 显示详细的版本信息
@@ -913,13 +783,12 @@ config_management() {
     print_title
     echo -e "${YELLOW}配置管理:${RESET}"
     echo "1) 修改仓库URL"
-    echo "2) 设置自动更新检查周期"
-    echo "3) 恢复默认配置"
-    echo "4) 自定义框架快捷名称"  # 新增选项
+    echo "2) 恢复默认配置"
+    echo "3) 自定义框架快捷名称"
     echo "0) 返回上一级菜单"
     echo ""
     
-    read -p "请选择 [0-4]: " choice  # 更新选项数量
+    read -p "请选择 [0-3]: " choice
     
     case $choice in
         1)
@@ -935,15 +804,6 @@ config_management() {
             fi
             ;;
         2)
-            read -p "请输入自动检查更新的周期(天): " days
-            if [[ "$days" =~ ^[0-9]+$ ]]; then
-                sed -i "s|CHECK_UPDATE_DAYS=.*|CHECK_UPDATE_DAYS=$days|" "$CONFIG_FILE"
-                print_success "更新检查周期已设置为 $days 天"
-            else
-                print_error "无效输入，请输入数字"
-            fi
-            ;;
-        3)
             read -p "确定要恢复默认配置? (y/n): " confirm
             if [[ "$confirm" =~ ^[Yy]$ ]]; then
                 # 备份当前配置
@@ -960,12 +820,6 @@ REPO_URL="$REPO_URL"
 # 默认镜像源（清华大学镜像）
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
 
-# 自动检查更新（天数）
-CHECK_UPDATE_DAYS=7
-
-# 上次检查更新时间
-LAST_UPDATE_CHECK=0
-
 # 快捷名称
 SHORTCUT_NAME="termux-framework"
 EOF
@@ -975,7 +829,7 @@ EOF
                 print_info "原配置已备份为 $CONFIG_FILE.bak"
             fi
             ;;
-        4)
+        3)
             echo "当前快捷名称: $SHORTCUT_NAME"
             read -p "请输入新的快捷名称 (留空使用默认值'termux-framework'): " new_name
             
