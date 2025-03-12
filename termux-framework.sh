@@ -121,7 +121,7 @@ configure_git_for_public_repos() {
     fi
 }
 
-# 更新框架快捷链接 - 完全重写的解决方案
+# 更新框架快捷链接 - 修复版
 update_framework_shortcut() {
     # 获取当前脚本的实际路径
     local current_script="$(realpath "$0")"
@@ -131,7 +131,7 @@ update_framework_shortcut() {
         rm -f "$PREFIX/bin/$1"
     fi
     
-    # 创建快捷链接 - 使用当前脚本的实际路径，而不是硬编码路径
+    # 创建快捷链接 - 使用当前脚本的实际路径
     cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 exec "$current_script" "\$@"
@@ -515,6 +515,47 @@ first_run() {
     fi
 }
 
+# 更新框架功能 (从1.0.2版本恢复)
+update_framework() {
+    print_title
+    print_info "正在更新框架..."
+    
+    # 备份当前目录
+    local backup_dir="$SCRIPT_DIR.backup"
+    if [ -d "$SCRIPT_DIR/.git" ]; then
+        cd "$SCRIPT_DIR"
+        
+        # 保存当前配置
+        cp "$CONFIG_FILE" /tmp/termux_framework_config.tmp
+        
+        # 获取最新代码
+        if git pull; then
+            # 恢复配置（但保留可能的新设置）
+            if [ -f /tmp/termux_framework_config.tmp ]; then
+                source /tmp/termux_framework_config.tmp
+                # 更新配置文件中的版本号但保留用户设置
+                sed -i "s/VERSION=.*/VERSION=\"$VERSION\"/" "$CONFIG_FILE"
+                rm /tmp/termux_framework_config.tmp
+            fi
+            
+            print_success "框架更新成功"
+            
+            # 更新快捷链接
+            update_framework_shortcut
+            
+            # 重新加载更新后的框架
+            exec "$0"
+            exit 0
+        else
+            print_error "更新失败，请检查网络连接或仓库权限"
+        fi
+    else
+        print_error "未找到Git仓库信息，无法更新"
+    fi
+    
+    press_enter
+}
+
 # 新增功能：脚本仓库管理
 manage_script_repository() {
     while true; do
@@ -707,7 +748,7 @@ create_script_shortcut() {
         fi
         
         # 获取脚本的绝对路径
-        local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
+        local abs_script_path=$(realpath "$script_path")
         
         # 检查快捷方式名称是否已存在
         if command -v "$shortcut_name" &> /dev/null; then
@@ -718,19 +759,12 @@ create_script_shortcut() {
                 press_enter
                 return
             fi
-            
-            # 如果已存在，先移除
-            rm -f "$PREFIX/bin/$shortcut_name"
         fi
         
-        # 在bin中创建快捷方式
+        # 在bin中创建快捷方式 - 使用脚本的实际路径
         cat > "$PREFIX/bin/$shortcut_name" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
-# 脚本快捷方式
-# 目标: $abs_script_path
-
-# 切换到脚本目录并执行，确保相对路径引用正确
-cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
+exec "$abs_script_path" "\$@"
 EOF
         chmod +x "$PREFIX/bin/$shortcut_name"
         
@@ -754,17 +788,15 @@ settings_menu() {
         echo "1) 查看当前版本信息"
         echo "2) 卸载功能"
         echo "3) 配置管理"
-        echo "4) 修复快捷方式" # 新增修复选项
         echo "0) 返回主菜单"
         echo ""
         
-        read -p "请选择 [0-4]: " choice
+        read -p "请选择 [0-3]: " choice
         
         case $choice in
             1) show_version_info ;;
             2) uninstall_menu ;;
             3) config_management ;;
-            4) repair_shortcuts ;; # 新增功能
             0) return ;;
             *) 
                 print_error "无效选项"
@@ -772,48 +804,6 @@ settings_menu() {
                 ;;
         esac
     done
-}
-
-# 修复所有快捷方式 - 新增功能
-repair_shortcuts() {
-    print_title
-    echo -e "${YELLOW}修复快捷方式:${RESET}"
-    
-    # 1. 修复主框架快捷方式
-    print_info "正在修复主框架快捷方式..."
-    update_framework_shortcut
-    
-    # 2. 修复其他脚本快捷方式
-    local shortcuts_file="$SCRIPT_DIR/shortcuts/shortcuts.list"
-    if [ -f "$shortcuts_file" ] && [ -s "$shortcuts_file" ]; then
-        print_info "正在修复脚本快捷方式..."
-        
-        while IFS=: read -r shortcut_name script_path; do
-            if [ -f "$script_path" ] && [ -x "$script_path" ]; then
-                local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
-                
-                # 创建更可靠的快捷方式
-                cat > "$PREFIX/bin/$shortcut_name" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-# 脚本快捷方式
-# 目标: $abs_script_path
-
-# 切换到脚本目录并执行，确保相对路径引用正确
-cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
-EOF
-                chmod +x "$PREFIX/bin/$shortcut_name"
-                print_info "已修复快捷方式: $shortcut_name -> $abs_script_path"
-            else
-                print_warning "脚本不存在或不可执行: $script_path (快捷方式: $shortcut_name)"
-            fi
-        done < "$shortcuts_file"
-        
-        print_success "所有快捷方式修复完成"
-    else
-        print_info "未找到其他脚本快捷方式"
-    fi
-    
-    press_enter
 }
 
 # 显示详细的版本信息
@@ -941,7 +931,7 @@ EOF
     press_enter
 }
 
-# 主菜单（已更新）
+# 主菜单
 main_menu() {
     # 声明关联数组
     declare -A pinned_scripts
@@ -954,15 +944,16 @@ main_menu() {
         echo "1) 安装基本环境"
         echo "2) 更新Termux环境"
         echo "3) 切换软件源"
-        echo "4) 脚本仓库管理"  # 改变自"拉取最新脚本"
-        echo "5) 设置"          # 改变自"卸载功能"
+        echo "4) 更新框架"         # 恢复此功能
+        echo "5) 脚本仓库管理"
+        echo "6) 设置"
         echo ""
         
         # 显示固定脚本（如果有）
         local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
         if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
             echo -e "${YELLOW}已固定脚本:${RESET}"
-            local pin_idx=6
+            local pin_idx=7
             
             while IFS=: read -r script_path display_name; do
                 if [ -f "$script_path" ] && [ -x "$script_path" ]; then
@@ -973,7 +964,7 @@ main_menu() {
             done < "$pinned_file"
             echo ""
         else
-            local pin_idx=6
+            local pin_idx=7
         fi
         
         # 扫描并显示可用脚本
@@ -1006,15 +997,16 @@ main_menu() {
             1) install_basic_environment ;;
             2) update_termux ;;
             3) switch_mirror ;;
-            4) manage_script_repository ;;  # 新功能
-            5) settings_menu ;;             # 新功能
+            4) update_framework ;;       # 恢复此功能
+            5) manage_script_repository ;;
+            6) settings_menu ;;
             0) 
                 echo "感谢使用，再见！"
                 exit 0
                 ;;
             *)
                 # 处理固定脚本
-                if [[ $choice -ge 6 && $choice -lt $pin_idx ]]; then
+                if [[ $choice -ge 7 && $choice -lt $pin_idx ]]; then
                     execute_script "${pinned_scripts[$choice]}"
                 # 处理常规脚本
                 elif [[ $choice -ge $pin_idx && $choice -lt $i ]]; then
