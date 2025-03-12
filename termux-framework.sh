@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
 # Termux集成脚本框架
-VERSION="1.0.5"
+VERSION="1.0.4"
 
 # 颜色定义
 RED="\033[31m"
@@ -439,17 +439,14 @@ EOF
     exit 0
 }
 
-# 检查是否是首次运行
-first_run() {
-    if [ ! -f "$SCRIPT_DIR/.initialized" ]; then
-        print_title
-        print_info "首次运行设置..."
-        
-        check_dependencies
-        configure_git
+# 初始化框架
+init_framework() {
+    # 确保必要的目录存在
+    mkdir -p "$SCRIPTS_DIR"
+    
+    # 检查快捷链接是否存在，不存在则创建
+    if [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" ]; then
         update_framework_shortcut
-        
-        touch "$SCRIPT_DIR/.initialized"
     fi
 }
 
@@ -907,5 +904,5 @@ main_menu() {
 }
 
 # 主程序
-first_run
+init_framework
 main_menu
