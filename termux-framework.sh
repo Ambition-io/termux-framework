@@ -121,17 +121,70 @@ configure_git_for_public_repos() {
     fi
 }
 
-# 更新框架快捷链接 - 修复版
+# 更新框架快捷链接 - 完全重写的解决方案
 update_framework_shortcut() {
-    # 获取当前脚本的实际路径
-    local current_script="$(realpath "$0")"
+    # 获取当前脚本的绝对路径 - 使用多种方法确保获取成功
+    local current_script=""
     
-    # 检查快捷方式名称是否已存在
+    # 尝试使用readlink获取脚本路径
+    if command -v readlink &> /dev/null; then
+        current_script="$(readlink -f "$0" 2>/dev/null)"
+    fi
+    
+    # 如果readlink失败，尝试使用realpath
+    if [ -z "$current_script" ] && command -v realpath &> /dev/null; then
+        current_script="$(realpath "$0" 2>/dev/null)"
+    fi
+    
+    # 如果上述方法都失败，使用基本方法拼接路径
+    if [ -z "$current_script" ]; then
+        current_script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    fi
+    
+    # 检查是否从快捷方式运行，避免循环引用
+    if [ "$current_script" = "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+        print_warning "检测到从快捷方式运行，正在查找原始脚本..."
+        
+        # 尝试查找原始脚本
+        local found=0
+        # 首先检查标准命名的脚本
+        if [ -f "$SCRIPT_DIR/termux-framework.sh" ]; then
+            current_script="$SCRIPT_DIR/termux-framework.sh"
+            found=1
+        else
+            # 否则搜索任何看起来像框架的脚本
+            for potential_script in "$SCRIPT_DIR"/*.sh; do
+                if [ -f "$potential_script" ] && grep -q "Termux.*集成脚本框架" "$potential_script"; then
+                    current_script="$potential_script"
+                    found=1
+                    break
+                fi
+            done
+        fi
+        
+        # 如果找不到原始脚本，无法继续
+        if [ $found -eq 0 ]; then
+            print_error "无法找到原始脚本! 无法更新快捷链接。"
+            return 1
+        fi
+    fi
+    
+    print_info "使用脚本路径: $current_script"
+    
+    # 检查快捷方式名称是否已存在且不是指向我们的脚本
     if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null; then
-        # 检查是否不是指向我们的脚本
-        if [ ! -L "$PREFIX/bin/$SHORTCUT_NAME" ] || [ "$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME" 2>/dev/null)" != "$current_script" ]; then
-            print_warning "命令 '$SHORTCUT_NAME' 已存在于系统中且不是指向本框架的链接。使用此名称可能会导致冲突。"
-            read -p "是否继续? (y/n): " continue_anyway
+        local target=""
+        if [ -L "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+            # 如果是符号链接，获取其目标
+            target=$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME" 2>/dev/null)
+        elif [ -f "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+            # 如果是文件，查看它执行的命令
+            target=$(grep -o 'exec "[^"]*"' "$PREFIX/bin/$SHORTCUT_NAME" 2>/dev/null | sed 's/exec "\(.*\)"/\1/')
+        fi
+        
+        if [ -n "$target" ] && [ "$target" != "$current_script" ]; then
+            print_warning "命令 '$SHORTCUT_NAME' 已存在且指向不同的脚本: $target"
+            read -p "是否覆盖? (y/n): " continue_anyway
             if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
                 print_warning "框架快捷链接更新已取消"
                 return 1
@@ -140,19 +193,38 @@ update_framework_shortcut() {
     fi
 
     # 如果旧快捷链接存在且不同于新名称，先移除
-    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/$1" ]; then
+    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -e "$PREFIX/bin/$1" ]; then
         rm -f "$PREFIX/bin/$1"
+        print_info "已移除旧快捷链接: $1"
     fi
     
-    # 创建快捷链接 - 使用当前脚本的实际路径
+    # 如果当前快捷方式已存在，先删除它
+    if [ -e "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+        rm -f "$PREFIX/bin/$SHORTCUT_NAME"
+    fi
+    
+    # 创建新的快捷方式脚本
     cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
-exec "$current_script" "\$@"
+# Termux框架快捷方式
+# 目标脚本: $current_script
+# 创建时间: $(date)
+
+# 直接调用原始脚本并传递所有参数
+cd "$(dirname "$current_script")" && exec "$(basename "$current_script")" "\$@"
 EOF
     chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
     
-    print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
+    # 验证快捷方式是否创建成功
+    if [ -x "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+        print_success "框架快捷链接已创建/更新: $SHORTCUT_NAME -> $current_script"
+    else
+        print_error "框架快捷链接创建失败!"
+    fi
 }
+
+# 剩余代码保持不变...
+# [以下是原始代码的其余部分]
 
 # 扫描可用脚本
 scan_scripts() {
@@ -680,7 +752,7 @@ view_pinned_scripts() {
     press_enter
 }
 
-# 为脚本创建快捷命令
+# 为脚本创建快捷命令 - 修正版本
 create_script_shortcut() {
     print_title
     echo -e "${YELLOW}为脚本创建快捷名称:${RESET}"
@@ -719,6 +791,9 @@ create_script_shortcut() {
             shortcut_name="$script_name"
         fi
         
+        # 获取脚本的绝对路径
+        local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
+        
         # 检查快捷方式名称是否已存在
         if command -v "$shortcut_name" &> /dev/null; then
             print_warning "命令 '$shortcut_name' 已存在于系统中。使用此名称可能会导致冲突。"
@@ -728,18 +803,25 @@ create_script_shortcut() {
                 press_enter
                 return
             fi
+            
+            # 如果已存在，先移除
+            rm -f "$PREFIX/bin/$shortcut_name"
         fi
         
         # 在bin中创建快捷方式
         cat > "$PREFIX/bin/$shortcut_name" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
-exec "$script_path" "\$@"
+# 脚本快捷方式
+# 目标: $abs_script_path
+
+# 切换到脚本目录并执行，确保相对路径引用正确
+cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
 EOF
         chmod +x "$PREFIX/bin/$shortcut_name"
         
         # 存储快捷方式信息
         mkdir -p "$SCRIPT_DIR/shortcuts"
-        echo "$shortcut_name:$script_path" >> "$SCRIPT_DIR/shortcuts/shortcuts.list"
+        echo "$shortcut_name:$abs_script_path" >> "$SCRIPT_DIR/shortcuts/shortcuts.list"
         
         print_success "快捷命令 '$shortcut_name' 已创建"
     else
@@ -757,15 +839,17 @@ settings_menu() {
         echo "1) 查看当前版本信息"
         echo "2) 卸载功能"
         echo "3) 配置管理"
+        echo "4) 修复快捷方式" # 新增修复选项
         echo "0) 返回主菜单"
         echo ""
         
-        read -p "请选择 [0-3]: " choice
+        read -p "请选择 [0-4]: " choice
         
         case $choice in
             1) show_version_info ;;
             2) uninstall_menu ;;
             3) config_management ;;
+            4) repair_shortcuts ;; # 新增功能
             0) return ;;
             *) 
                 print_error "无效选项"
@@ -773,6 +857,48 @@ settings_menu() {
                 ;;
         esac
     done
+}
+
+# 修复所有快捷方式 - 新增功能
+repair_shortcuts() {
+    print_title
+    echo -e "${YELLOW}修复快捷方式:${RESET}"
+    
+    # 1. 修复主框架快捷方式
+    print_info "正在修复主框架快捷方式..."
+    update_framework_shortcut
+    
+    # 2. 修复其他脚本快捷方式
+    local shortcuts_file="$SCRIPT_DIR/shortcuts/shortcuts.list"
+    if [ -f "$shortcuts_file" ] && [ -s "$shortcuts_file" ]; then
+        print_info "正在修复脚本快捷方式..."
+        
+        while IFS=: read -r shortcut_name script_path; do
+            if [ -f "$script_path" ] && [ -x "$script_path" ]; then
+                local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
+                
+                # 创建更可靠的快捷方式
+                cat > "$PREFIX/bin/$shortcut_name" << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+# 脚本快捷方式
+# 目标: $abs_script_path
+
+# 切换到脚本目录并执行，确保相对路径引用正确
+cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
+EOF
+                chmod +x "$PREFIX/bin/$shortcut_name"
+                print_info "已修复快捷方式: $shortcut_name -> $abs_script_path"
+            else
+                print_warning "脚本不存在或不可执行: $script_path (快捷方式: $shortcut_name)"
+            fi
+        done < "$shortcuts_file"
+        
+        print_success "所有快捷方式修复完成"
+    else
+        print_info "未找到其他脚本快捷方式"
+    fi
+    
+    press_enter
 }
 
 # 显示详细的版本信息
