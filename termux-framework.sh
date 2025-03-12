@@ -123,108 +123,23 @@ configure_git_for_public_repos() {
 
 # 更新框架快捷链接 - 完全重写的解决方案
 update_framework_shortcut() {
-    # 获取当前脚本的绝对路径 - 使用多种方法确保获取成功
-    local current_script=""
+    # 获取当前脚本的实际路径
+    local current_script="$(realpath "$0")"
     
-    # 尝试使用readlink获取脚本路径
-    if command -v readlink &> /dev/null; then
-        current_script="$(readlink -f "$0" 2>/dev/null)"
-    fi
-    
-    # 如果readlink失败，尝试使用realpath
-    if [ -z "$current_script" ] && command -v realpath &> /dev/null; then
-        current_script="$(realpath "$0" 2>/dev/null)"
-    fi
-    
-    # 如果上述方法都失败，使用基本方法拼接路径
-    if [ -z "$current_script" ]; then
-        current_script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-    fi
-    
-    # 检查是否从快捷方式运行，避免循环引用
-    if [ "$current_script" = "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-        print_warning "检测到从快捷方式运行，正在查找原始脚本..."
-        
-        # 尝试查找原始脚本
-        local found=0
-        # 首先检查标准命名的脚本
-        if [ -f "$SCRIPT_DIR/termux-framework.sh" ]; then
-            current_script="$SCRIPT_DIR/termux-framework.sh"
-            found=1
-        else
-            # 否则搜索任何看起来像框架的脚本
-            for potential_script in "$SCRIPT_DIR"/*.sh; do
-                if [ -f "$potential_script" ] && grep -q "Termux.*集成脚本框架" "$potential_script"; then
-                    current_script="$potential_script"
-                    found=1
-                    break
-                fi
-            done
-        fi
-        
-        # 如果找不到原始脚本，无法继续
-        if [ $found -eq 0 ]; then
-            print_error "无法找到原始脚本! 无法更新快捷链接。"
-            return 1
-        fi
-    fi
-    
-    print_info "使用脚本路径: $current_script"
-    
-    # 检查快捷方式名称是否已存在且不是指向我们的脚本
-    if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null; then
-        local target=""
-        if [ -L "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-            # 如果是符号链接，获取其目标
-            target=$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME" 2>/dev/null)
-        elif [ -f "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-            # 如果是文件，查看它执行的命令
-            target=$(grep -o 'exec "[^"]*"' "$PREFIX/bin/$SHORTCUT_NAME" 2>/dev/null | sed 's/exec "\(.*\)"/\1/')
-        fi
-        
-        if [ -n "$target" ] && [ "$target" != "$current_script" ]; then
-            print_warning "命令 '$SHORTCUT_NAME' 已存在且指向不同的脚本: $target"
-            read -p "是否覆盖? (y/n): " continue_anyway
-            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-                print_warning "框架快捷链接更新已取消"
-                return 1
-            fi
-        fi
-    fi
-
     # 如果旧快捷链接存在且不同于新名称，先移除
-    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -e "$PREFIX/bin/$1" ]; then
+    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/$1" ]; then
         rm -f "$PREFIX/bin/$1"
-        print_info "已移除旧快捷链接: $1"
     fi
     
-    # 如果当前快捷方式已存在，先删除它
-    if [ -e "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-        rm -f "$PREFIX/bin/$SHORTCUT_NAME"
-    fi
-    
-    # 创建新的快捷方式脚本
+    # 创建快捷链接 - 使用当前脚本的实际路径，而不是硬编码路径
     cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
-# Termux框架快捷方式
-# 目标脚本: $current_script
-# 创建时间: $(date)
-
-# 直接调用原始脚本并传递所有参数
-cd "$(dirname "$current_script")" && exec "$(basename "$current_script")" "\$@"
+exec "$current_script" "\$@"
 EOF
     chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
     
-    # 验证快捷方式是否创建成功
-    if [ -x "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-        print_success "框架快捷链接已创建/更新: $SHORTCUT_NAME -> $current_script"
-    else
-        print_error "框架快捷链接创建失败!"
-    fi
+    print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
 }
-
-# 剩余代码保持不变...
-# [以下是原始代码的其余部分]
 
 # 扫描可用脚本
 scan_scripts() {
