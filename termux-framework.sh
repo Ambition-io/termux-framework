@@ -2,7 +2,7 @@
 
 # ========================================
 # Termux集成脚本框架
-# 版本：1.0.4
+# 版本：1.0.2
 # ========================================
 
 # 颜色定义
@@ -19,7 +19,7 @@ SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
 REPO_URL="https://github.com/Ambition-io/termux-framework.git"
-VERSION="1.0.4"
+VERSION="1.0.2"
 
 # 确保目录存在
 mkdir -p "$SCRIPTS_DIR"
@@ -36,8 +36,11 @@ REPO_URL="$REPO_URL"
 # 默认镜像源（清华大学镜像）
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
 
-# 快捷名称
-SHORTCUT_NAME="termux-framework"
+# 自动检查更新（天数）
+CHECK_UPDATE_DAYS=7
+
+# 上次检查更新时间
+LAST_UPDATE_CHECK=0
 EOF
     chmod +x "$CONFIG_FILE"
 fi
@@ -104,48 +107,39 @@ check_dependencies() {
     fi
 }
 
-# 配置Git以使用HTTPS且不提示认证
-configure_git_for_public_repos() {
-    # 确保Git已安装
-    if command -v git &> /dev/null; then
-        # 设置配置以避免认证提示
-        git config --global core.askPass ""
-        git config --global credential.helper ""
+# 更新框架
+update_framework() {
+    print_info "正在更新框架..."
+    
+    # 备份当前目录
+    local backup_dir="$SCRIPT_DIR.backup"
+    if [ -d "$SCRIPT_DIR/.git" ]; then
+        cd "$SCRIPT_DIR"
         
-        # 确保REPO_URL使用HTTPS
-        if [[ "$REPO_URL" == git@* ]]; then
-            REPO_URL=$(echo "$REPO_URL" | sed -e 's|git@github.com:|https://github.com/|')
-            sed -i "s|REPO_URL=.*|REPO_URL=\"$REPO_URL\"|" "$CONFIG_FILE"
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+        # 保存当前配置
+        cp "$CONFIG_FILE" /tmp/termux_framework_config.tmp
+        
+        # 获取最新代码
+        if git pull; then
+            # 恢复配置（但保留可能的新设置）
+            if [ -f /tmp/termux_framework_config.tmp ]; then
+                source /tmp/termux_framework_config.tmp
+                # 更新配置文件中的版本号但保留用户设置
+                sed -i "s/VERSION=.*/VERSION=\"$VERSION\"/" "$CONFIG_FILE"
+                rm /tmp/termux_framework_config.tmp
+            fi
+            
+            print_success "框架更新成功"
+            exec "$SCRIPT_DIR/termux-framework.sh"
+            exit 0
+        else
+            print_error "更新失败，请检查网络连接或仓库权限"
         fi
-    fi
-}
-
-# 更新框架快捷链接 - 修正后的函数
-update_framework_shortcut() {
-    # 检查快捷方式名称是否已存在
-    if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null && [ ! -L "$PREFIX/bin/$SHORTCUT_NAME" ] && [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" -o "$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME")" != "$0" ]; then
-        print_warning "命令 '$SHORTCUT_NAME' 已存在于系统中且不是指向本框架的链接。使用此名称可能会导致冲突。"
-        read -p "是否继续? (y/n): " continue_anyway
-        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-            print_warning "框架快捷链接更新已取消"
-            return 1
-        fi
-    fi
-
-    # 如果旧快捷链接存在且不同于新名称，先移除
-    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/$1" ]; then
-        rm -f "$PREFIX/bin/$1"
+    else
+        print_error "未找到Git仓库信息，无法更新"
     fi
     
-    # 创建快捷链接 - 修正为直接指向当前脚本
-    cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-exec "$0" "\$@"
-EOF
-    chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
-    
-    print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
+    press_enter
 }
 
 # 扫描可用脚本
@@ -314,22 +308,7 @@ pull_repository_scripts() {
     
     if [ -d "$SCRIPTS_DIR/.git" ]; then
         cd "$SCRIPTS_DIR"
-        
-        # 确保使用HTTPS协议且不提示认证
-        git config --local core.askPass ""
-        git config --local credential.helper ""
-        
-        # 获取仓库URL并确保使用HTTPS
-        local current_remote=$(git config --get remote.origin.url)
-        if [[ "$current_remote" == git@* ]]; then
-            # 转换SSH格式到HTTPS格式
-            local https_url=$(echo "$current_remote" | sed -e 's|git@github.com:|https://github.com/|')
-            git remote set-url origin "$https_url"
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-        fi
-        
-        # 不提示输入认证信息
-        GIT_TERMINAL_PROMPT=0 git pull
+        git pull
     else
         # 假设脚本仓库可能与框架仓库不同
         read -p "请输入脚本仓库URL (直接回车使用默认): " scripts_repo
@@ -337,15 +316,8 @@ pull_repository_scripts() {
             scripts_repo="$REPO_URL"
         fi
         
-        # 确保使用HTTPS协议
-        if [[ "$scripts_repo" == git@* ]]; then
-            scripts_repo=$(echo "$scripts_repo" | sed -e 's|git@github.com:|https://github.com/|')
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-        fi
-        
         rm -rf "$SCRIPTS_DIR"
-        # 克隆时不提示输入认证信息
-        GIT_TERMINAL_PROMPT=0 git clone "$scripts_repo" "$SCRIPTS_DIR"
+        git clone "$scripts_repo" "$SCRIPTS_DIR"
     fi
     
     # 确保所有脚本有执行权限
@@ -367,6 +339,78 @@ execute_script() {
     fi
     
     press_enter
+}
+
+# 主菜单
+main_menu() {
+    while true; do
+        print_title
+        
+        echo -e "${YELLOW}基本功能:${RESET}"
+        echo "1) 安装基本环境"
+        echo "2) 更新Termux环境"
+        echo "3) 切换软件源"
+        echo "4) 更新框架"
+        echo "5) 拉取最新脚本"
+        echo "6) 卸载功能"
+        echo ""
+        
+        # 扫描并显示可用脚本
+        local scripts=($(scan_scripts))
+        if [ ${#scripts[@]} -gt 0 ]; then
+            echo -e "${YELLOW}可用脚本:${RESET}"
+            local i=6
+            
+            for script_info in "${scripts[@]}"; do
+                IFS=':' read -r script_path script_desc <<< "$script_info"
+                echo "$i) $script_desc"
+                script_paths[$i]="$script_path"
+                ((i++))
+            done
+            echo ""
+        fi
+        
+        echo -e "${YELLOW}其他选项:${RESET}"
+        echo "0) 退出"
+        echo ""
+        
+        read -p "请选择 [0-$((i-1))]: " choice
+        
+        case $choice in
+            1) install_basic_environment ;;
+            2) update_termux ;;
+            3) switch_mirror ;;
+            4) update_framework ;;
+            5) pull_repository_scripts ;;
+            6) uninstall_menu ;;
+            0) 
+                echo "感谢使用，再见！"
+                exit 0
+                ;;
+            *)
+                if [[ $choice -ge 6 && $choice -lt $i ]]; then
+                    execute_script "${script_paths[$choice]}"
+                else
+                    print_error "无效选项"
+                    press_enter
+                fi
+                ;;
+        esac
+    done
+}
+
+# 检查是否是首次运行
+first_run() {
+    if [ ! -f "$SCRIPT_DIR/.initialized" ]; then
+        print_title
+        print_info "首次运行设置..."
+        
+        # 检查依赖
+        check_dependencies
+        
+        # 设置初始化完成标记
+        touch "$SCRIPT_DIR/.initialized"
+    fi
 }
 
 # 卸载菜单
@@ -473,14 +517,8 @@ uninstall_framework() {
     cat > "$temp_script" << 'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 
-# 获取配置文件中的快捷名称
-SHORTCUT_NAME=$(grep -m 1 "^SHORTCUT_NAME=" "$HOME/.termux-framework/config.sh" | cut -d'"' -f2)
-if [ -z "$SHORTCUT_NAME" ]; then
-    SHORTCUT_NAME="termux-framework"
-fi
-
 # 清理符号链接
-rm -f "$PREFIX/bin/$SHORTCUT_NAME"
+rm -f "$PREFIX/bin/termux-framework"
 
 # 删除框架目录
 rm -rf "$HOME/.termux-framework"
@@ -500,485 +538,6 @@ EOF
     # 执行临时脚本并退出
     exec "$temp_script"
     exit 0
-}
-
-# 检查是否是首次运行 - 修正后的函数
-first_run() {
-    if [ ! -f "$SCRIPT_DIR/.initialized" ]; then
-        print_title
-        print_info "首次运行设置..."
-        
-        # 检查依赖
-        check_dependencies
-        
-        # 配置Git以使用HTTPS且不提示认证
-        configure_git_for_public_repos
-        
-        # 更新框架快捷链接
-        update_framework_shortcut
-        
-        # 设置初始化完成标记
-        touch "$SCRIPT_DIR/.initialized"
-    fi
-}
-
-# 新增功能：脚本仓库管理
-manage_script_repository() {
-    while true; do
-        print_title
-        echo -e "${YELLOW}脚本仓库管理:${RESET}"
-        echo "1) 拉取最新脚本"
-        echo "2) 固定脚本到主菜单"
-        echo "3) 取消固定脚本"
-        echo "4) 为脚本创建快捷名称"
-        echo "5) 查看已固定脚本"
-        echo "0) 返回主菜单"
-        echo ""
-        
-        read -p "请选择 [0-5]: " choice
-        
-        case $choice in
-            1) pull_repository_scripts ;;
-            2) pin_script_to_menu ;;
-            3) unpin_script ;;
-            4) create_script_shortcut ;;
-            5) view_pinned_scripts ;;
-            0) return ;;
-            *) 
-                print_error "无效选项"
-                press_enter
-                ;;
-        esac
-    done
-}
-
-# 将脚本固定到主菜单
-pin_script_to_menu() {
-    print_title
-    echo -e "${YELLOW}可用脚本:${RESET}"
-    
-    # 扫描可用脚本
-    local scripts=($(scan_scripts))
-    if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可用的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A script_map
-    
-    for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc ($(basename "$script_path"))"
-        script_map[$i]="$script_path"
-        ((i++))
-    done
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要固定的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local script_path="${script_map[$choice]}"
-        local script_name=$(basename "$script_path")
-        
-        read -p "请输入显示在菜单中的名称 (默认: $script_name): " display_name
-        if [ -z "$display_name" ]; then
-            display_name="$script_name"
-        fi
-        
-        # 创建固定脚本目录（如果不存在）
-        mkdir -p "$SCRIPT_DIR/pinned"
-        
-        # 保存固定信息
-        echo "$script_path:$display_name" >> "$SCRIPT_DIR/pinned/scripts.list"
-        
-        print_success "脚本 '$script_name' 已成功固定到主菜单"
-    else
-        print_error "无效选项"
-    fi
-    
-    press_enter
-}
-
-# 从主菜单取消固定脚本
-unpin_script() {
-    print_title
-    echo -e "${YELLOW}已固定的脚本:${RESET}"
-    
-    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
-        print_warning "没有找到已固定的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A pinned_map
-    
-    while IFS=: read -r script_path display_name; do
-        echo "$i) $display_name ($(basename "$script_path"))"
-        pinned_map[$i]="$script_path:$display_name"
-        ((i++))
-    done < "$pinned_file"
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要取消固定的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local entry="${pinned_map[$choice]}"
-        
-        # 从固定列表中删除条目
-        grep -v "^$entry$" "$pinned_file" > "$pinned_file.tmp"
-        mv "$pinned_file.tmp" "$pinned_file"
-        
-        # 提取显示名称以用于成功消息
-        IFS=':' read -r script_path display_name <<< "$entry"
-        
-        print_success "脚本 '$display_name' 已成功从主菜单移除"
-    else
-        print_error "无效选项"
-    fi
-    
-    press_enter
-}
-
-# 查看已固定脚本
-view_pinned_scripts() {
-    print_title
-    echo -e "${YELLOW}已固定的脚本:${RESET}"
-    
-    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
-        print_warning "没有找到已固定的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    
-    while IFS=: read -r script_path display_name; do
-        echo "$i) $display_name ($(basename "$script_path"))"
-        ((i++))
-    done < "$pinned_file"
-    
-    echo ""
-    press_enter
-}
-
-# 为脚本创建快捷命令
-create_script_shortcut() {
-    print_title
-    echo -e "${YELLOW}为脚本创建快捷名称:${RESET}"
-    
-    # 扫描可用脚本
-    local scripts=($(scan_scripts))
-    if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可用的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A script_map
-    
-    for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc ($(basename "$script_path"))"
-        script_map[$i]="$script_path"
-        ((i++))
-    done
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要创建快捷方式的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local script_path="${script_map[$choice]}"
-        local script_name=$(basename "$script_path" .sh)
-        
-        read -p "请输入快捷命令名称 (默认: $script_name): " shortcut_name
-        if [ -z "$shortcut_name" ]; then
-            shortcut_name="$script_name"
-        fi
-        
-        # 检查快捷方式名称是否已存在
-        if command -v "$shortcut_name" &> /dev/null; then
-            print_warning "命令 '$shortcut_name' 已存在于系统中。使用此名称可能会导致冲突。"
-            read -p "是否继续? (y/n): " continue_anyway
-            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-                print_warning "快捷命令创建已取消"
-                press_enter
-                return
-            fi
-        fi
-        
-        # 在bin中创建快捷方式
-        cat > "$PREFIX/bin/$shortcut_name" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-exec "$script_path" "\$@"
-EOF
-        chmod +x "$PREFIX/bin/$shortcut_name"
-        
-        # 存储快捷方式信息
-        mkdir -p "$SCRIPT_DIR/shortcuts"
-        echo "$shortcut_name:$script_path" >> "$SCRIPT_DIR/shortcuts/shortcuts.list"
-        
-        print_success "快捷命令 '$shortcut_name' 已创建"
-    else
-        print_error "无效选项"
-    fi
-    
-    press_enter
-}
-
-# 设置菜单
-settings_menu() {
-    while true; do
-        print_title
-        echo -e "${YELLOW}设置选项:${RESET}"
-        echo "1) 查看当前版本信息"
-        echo "2) 卸载功能"
-        echo "3) 配置管理"
-        echo "0) 返回主菜单"
-        echo ""
-        
-        read -p "请选择 [0-3]: " choice
-        
-        case $choice in
-            1) show_version_info ;;
-            2) uninstall_menu ;;
-            3) config_management ;;
-            0) return ;;
-            *) 
-                print_error "无效选项"
-                press_enter
-                ;;
-        esac
-    done
-}
-
-# 显示详细的版本信息
-show_version_info() {
-    print_title
-    echo -e "${YELLOW}版本信息:${RESET}"
-    echo "框架版本: $VERSION"
-    echo "安装路径: $SCRIPT_DIR"
-    
-    # 统计已安装脚本数量
-    local script_count=$(find "$SCRIPTS_DIR" -type f -name "*.sh" | wc -l)
-    echo "已安装脚本: $script_count"
-    
-    # 统计已固定脚本数量（如果有）
-    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-    if [ -f "$pinned_file" ]; then
-        local pinned_count=$(wc -l < "$pinned_file")
-        echo "已固定脚本: $pinned_count"
-    else
-        echo "已固定脚本: 0"
-    fi
-    
-    # 显示安装日期（如果有跟踪）
-    if [ -f "$SCRIPT_DIR/.initialized" ]; then
-        local install_date=$(stat -c %y "$SCRIPT_DIR/.initialized" 2>/dev/null || stat -f "%Sm" "$SCRIPT_DIR/.initialized" 2>/dev/null)
-        echo "安装日期: $install_date"
-    fi
-    
-    echo ""
-    press_enter
-}
-
-# 配置管理
-config_management() {
-    print_title
-    echo -e "${YELLOW}配置管理:${RESET}"
-    echo "1) 修改仓库URL"
-    echo "2) 恢复默认配置"
-    echo "3) 自定义框架快捷名称"
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择 [0-3]: " choice
-    
-    case $choice in
-        1)
-            read -p "请输入新的仓库URL: " new_repo
-            if [ -n "$new_repo" ]; then
-                # 确保使用HTTPS协议
-                if [[ "$new_repo" == git@* ]]; then
-                    new_repo=$(echo "$new_repo" | sed -e 's|git@github.com:|https://github.com/|')
-                    print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-                fi
-                sed -i "s|REPO_URL=.*|REPO_URL=\"$new_repo\"|" "$CONFIG_FILE"
-                print_success "仓库URL已更新"
-            fi
-            ;;
-        2)
-            read -p "确定要恢复默认配置? (y/n): " confirm
-            if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                # 备份当前配置
-                cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
-                
-                # 创建默认配置
-                cat > "$CONFIG_FILE" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-# 配置文件
-
-# 仓库URL
-REPO_URL="$REPO_URL"
-
-# 默认镜像源（清华大学镜像）
-DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
-
-# 快捷名称
-SHORTCUT_NAME="termux-framework"
-EOF
-                chmod +x "$CONFIG_FILE"
-                
-                print_success "配置已重置为默认值"
-                print_info "原配置已备份为 $CONFIG_FILE.bak"
-            fi
-            ;;
-        3)
-            echo "当前快捷名称: $SHORTCUT_NAME"
-            read -p "请输入新的快捷名称 (留空使用默认值'termux-framework'): " new_name
-            
-            if [ -z "$new_name" ]; then
-                new_name="termux-framework"
-            fi
-            
-            # 检查快捷方式名称是否已存在
-            if command -v "$new_name" &> /dev/null && [ "$new_name" != "$SHORTCUT_NAME" ]; then
-                print_warning "命令 '$new_name' 已存在于系统中。使用此名称可能会导致冲突。"
-                read -p "是否继续? (y/n): " continue_anyway
-                if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-                    print_warning "快捷名称修改已取消"
-                    press_enter
-                    return
-                fi
-            fi
-            
-            # 保存旧快捷名称
-            local old_shortcut="$SHORTCUT_NAME"
-            
-            # 更新配置
-            sed -i "s|SHORTCUT_NAME=.*|SHORTCUT_NAME=\"$new_name\"|" "$CONFIG_FILE"
-            
-            # 重新加载配置
-            source "$CONFIG_FILE"
-            
-            # 更新快捷链接
-            update_framework_shortcut "$old_shortcut"
-            
-            print_success "快捷名称已更新为: $new_name"
-            ;;
-        0)
-            return
-            ;;
-        *)
-            print_error "无效选项"
-            ;;
-    esac
-    
-    press_enter
-}
-
-# 主菜单（已更新）
-main_menu() {
-    # 声明关联数组
-    declare -A pinned_scripts
-    declare -A script_paths
-    
-    while true; do
-        print_title
-        
-        echo -e "${YELLOW}基本功能:${RESET}"
-        echo "1) 安装基本环境"
-        echo "2) 更新Termux环境"
-        echo "3) 切换软件源"
-        echo "4) 脚本仓库管理"  # 改变自"拉取最新脚本"
-        echo "5) 设置"          # 改变自"卸载功能"
-        echo ""
-        
-        # 显示固定脚本（如果有）
-        local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-        if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
-            echo -e "${YELLOW}已固定脚本:${RESET}"
-            local pin_idx=6
-            
-            while IFS=: read -r script_path display_name; do
-                if [ -f "$script_path" ] && [ -x "$script_path" ]; then
-                    echo "$pin_idx) $display_name"
-                    pinned_scripts[$pin_idx]="$script_path"
-                    ((pin_idx++))
-                fi
-            done < "$pinned_file"
-            echo ""
-        else
-            local pin_idx=6
-        fi
-        
-        # 扫描并显示可用脚本
-        local scripts=($(scan_scripts))
-        if [ ${#scripts[@]} -gt 0 ]; then
-            echo -e "${YELLOW}可用脚本:${RESET}"
-            local i=$pin_idx  # 从固定脚本之后的索引继续编号
-            
-            for script_info in "${scripts[@]}"; do
-                IFS=':' read -r script_path script_desc <<< "$script_info"
-                # 跳过已固定的脚本，避免重复
-                if ! grep -q "^$script_path:" "$pinned_file" 2>/dev/null; then
-                    echo "$i) $script_desc"
-                    script_paths[$i]="$script_path"
-                    ((i++))
-                fi
-            done
-            echo ""
-        else
-            local i=$pin_idx
-        fi
-        
-        echo -e "${YELLOW}其他选项:${RESET}"
-        echo "0) 退出"
-        echo ""
-        
-        read -p "请选择 [0-$((i-1))]: " choice
-        
-        case $choice in
-            1) install_basic_environment ;;
-            2) update_termux ;;
-            3) switch_mirror ;;
-            4) manage_script_repository ;;  # 新功能
-            5) settings_menu ;;             # 新功能
-            0) 
-                echo "感谢使用，再见！"
-                exit 0
-                ;;
-            *)
-                # 处理固定脚本
-                if [[ $choice -ge 6 && $choice -lt $pin_idx ]]; then
-                    execute_script "${pinned_scripts[$choice]}"
-                # 处理常规脚本
-                elif [[ $choice -ge $pin_idx && $choice -lt $i ]]; then
-                    execute_script "${script_paths[$choice]}"
-                else
-                    print_error "无效选项"
-                    press_enter
-                fi
-                ;;
-        esac
-    done
 }
 
 # 主函数
