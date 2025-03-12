@@ -56,6 +56,17 @@ press_enter() {
     read -p "按 Enter 键继续..."
 }
 
+# 初始化框架
+init_framework() {
+    # 确保必要的目录存在
+    mkdir -p "$SCRIPTS_DIR"
+    
+    # 检查快捷链接是否存在，不存在则创建
+    if [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" ]; then
+        update_framework_shortcut
+    fi
+}
+
 # 检查必要的命令是否安装
 check_dependencies() {
     local deps=("git" "curl" "wget")
@@ -111,8 +122,8 @@ EOF
     print_info "框架快捷链接已创建/更新: $SHORTCUT_NAME"
 }
 
-# 扫描可用脚本
-scan_scripts() {
+# 扫描已安装脚本
+scan_installed_scripts() {
     local scripts=()
     
     if [ -d "$SCRIPTS_DIR" ]; then
@@ -265,67 +276,13 @@ install_basic_environment() {
     done
 }
 
-# 拉取仓库脚本
-pull_repository_scripts() {
-    print_title
-    print_info "从仓库拉取脚本..."
-    
-    if [ -d "$SCRIPTS_DIR/.git" ]; then
-        cd "$SCRIPTS_DIR"
-        
-        git config --local core.askPass ""
-        git config --local credential.helper ""
-        
-        local current_remote=$(git config --get remote.origin.url)
-        if [[ "$current_remote" == git@* ]]; then
-            local https_url=$(echo "$current_remote" | sed -e 's|git@github.com:|https://github.com/|')
-            git remote set-url origin "$https_url"
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-        fi
-        
-        GIT_TERMINAL_PROMPT=0 git pull
-    else
-        read -p "请输入脚本仓库URL (直接回车使用默认): " scripts_repo
-        if [ -z "$scripts_repo" ]; then
-            scripts_repo="$REPO_URL"
-        fi
-        
-        if [[ "$scripts_repo" == git@* ]]; then
-            scripts_repo=$(echo "$scripts_repo" | sed -e 's|git@github.com:|https://github.com/|')
-            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
-        fi
-        
-        rm -rf "$SCRIPTS_DIR"
-        GIT_TERMINAL_PROMPT=0 git clone "$scripts_repo" "$SCRIPTS_DIR"
-    fi
-    
-    find "$SCRIPTS_DIR" -name "*.sh" -exec chmod +x {} \;
-    
-    print_success "脚本更新完成"
-    press_enter
-}
-
-# 执行选定的脚本
-execute_script() {
-    local script="$1"
-    
-    if [ -f "$script" ] && [ -x "$script" ]; then
-        print_info "执行脚本: $(basename "$script")"
-        "$script"
-    else
-        print_error "脚本不存在或没有执行权限"
-    fi
-    
-    press_enter
-}
-
 # 卸载菜单
 uninstall_menu() {
     print_title
     echo -e "${YELLOW}卸载选项:${RESET}"
-    echo "1) 卸载扩展脚本"
+    echo "1) 卸载插件"
     echo "2) 卸载整个框架"
-    echo "0) 返回主菜单"
+    echo "0) 返回上一级菜单"
     echo ""
     
     read -p "请选择 [0-2]: " choice
@@ -342,14 +299,14 @@ uninstall_menu() {
     esac
 }
 
-# 卸载扩展脚本
+# 卸载插件
 uninstall_extension() {
     print_title
-    echo -e "${YELLOW}可卸载的扩展脚本:${RESET}"
+    echo -e "${YELLOW}可卸载的插件:${RESET}"
     
-    local scripts=($(scan_scripts))
+    local scripts=($(scan_installed_scripts))
     if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可卸载的扩展脚本"
+        print_warning "没有找到可卸载的插件"
         press_enter
         return
     fi
@@ -367,7 +324,7 @@ uninstall_extension() {
     echo "0) 返回上一级菜单"
     echo ""
     
-    read -p "请选择要卸载的脚本 [0-$((i-1))]: " choice
+    read -p "请选择要卸载的插件 [0-$((i-1))]: " choice
     
     if [[ $choice -eq 0 ]]; then
         uninstall_menu
@@ -376,10 +333,31 @@ uninstall_extension() {
         local script_path="${script_map[$choice]}"
         local script_name=$(basename "$script_path")
         
-        read -p "确定要卸载脚本 '$script_name'? (y/n): " confirm
+        read -p "确定要卸载插件 '$script_name'? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            # 移除固定列表中的项目
+            local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
+            if [ -f "$pinned_file" ]; then
+                grep -v "$script_path:" "$pinned_file" > "$pinned_file.tmp"
+                mv "$pinned_file.tmp" "$pinned_file"
+            fi
+            
+            # 移除快捷链接
+            local shortcuts_file="$SCRIPT_DIR/shortcuts/shortcuts.list"
+            if [ -f "$shortcuts_file" ]; then
+                while IFS=: read -r shortcut_name script_link; do
+                    if [[ "$script_link" == "$script_path" ]]; then
+                        rm -f "$PREFIX/bin/$shortcut_name"
+                    fi
+                done < "$shortcuts_file"
+                
+                grep -v ":$script_path$" "$shortcuts_file" > "$shortcuts_file.tmp"
+                mv "$shortcuts_file.tmp" "$shortcuts_file"
+            fi
+            
+            # 删除脚本文件
             rm -f "$script_path"
-            print_success "脚本 '$script_name' 已成功卸载"
+            print_success "插件 '$script_name' 已成功卸载"
         else
             print_warning "卸载已取消"
         fi
@@ -395,7 +373,7 @@ uninstall_extension() {
 uninstall_framework() {
     print_title
     echo -e "${RED}警告: 此操作将卸载整个Termux集成脚本框架${RESET}"
-    echo "包括所有扩展脚本和配置。"
+    echo "包括所有插件和配置。"
     echo ""
     
     read -p "确定要卸载整个框架? (y/n): " confirm
@@ -439,230 +417,15 @@ EOF
     exit 0
 }
 
-# 初始化框架
-init_framework() {
-    # 确保必要的目录存在
-    mkdir -p "$SCRIPTS_DIR"
+# 执行选定的脚本
+execute_script() {
+    local script="$1"
     
-    # 检查快捷链接是否存在，不存在则创建
-    if [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" ]; then
-        update_framework_shortcut
-    fi
-}
-
-# 脚本仓库管理
-manage_script_repository() {
-    while true; do
-        print_title
-        echo -e "${YELLOW}脚本仓库管理:${RESET}"
-        echo "1) 拉取最新脚本"
-        echo "2) 固定脚本到主菜单"
-        echo "3) 取消固定脚本"
-        echo "4) 为脚本创建快捷命令"
-        echo "5) 查看已固定脚本"
-        echo "0) 返回主菜单"
-        echo ""
-        
-        read -p "请选择 [0-5]: " choice
-        
-        case $choice in
-            1) pull_repository_scripts ;;
-            2) pin_script_to_menu ;;
-            3) unpin_script ;;
-            4) create_script_shortcut ;;
-            5) view_pinned_scripts ;;
-            0) return ;;
-            *) 
-                print_error "无效选项"
-                press_enter
-                ;;
-        esac
-    done
-}
-
-# 将脚本固定到主菜单
-pin_script_to_menu() {
-    print_title
-    echo -e "${YELLOW}可用脚本:${RESET}"
-    
-    local scripts=($(scan_scripts))
-    if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可用的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A script_map
-    
-    for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc ($(basename "$script_path"))"
-        script_map[$i]="$script_path"
-        ((i++))
-    done
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要固定的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local script_path="${script_map[$choice]}"
-        local script_name=$(basename "$script_path")
-        
-        read -p "请输入显示在菜单中的名称 (默认: $script_name): " display_name
-        if [ -z "$display_name" ]; then
-            display_name="$script_name"
-        fi
-        
-        mkdir -p "$SCRIPT_DIR/pinned"
-        echo "$script_path:$display_name" >> "$SCRIPT_DIR/pinned/scripts.list"
-        
-        print_success "脚本 '$script_name' 已成功固定到主菜单"
+    if [ -f "$script" ] && [ -x "$script" ]; then
+        print_info "执行插件: $(basename "$script")"
+        "$script"
     else
-        print_error "无效选项"
-    fi
-    
-    press_enter
-}
-
-# 从主菜单取消固定脚本
-unpin_script() {
-    print_title
-    echo -e "${YELLOW}已固定的脚本:${RESET}"
-    
-    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
-        print_warning "没有找到已固定的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A pinned_map
-    
-    while IFS=: read -r script_path display_name; do
-        echo "$i) $display_name ($(basename "$script_path"))"
-        pinned_map[$i]="$script_path:$display_name"
-        ((i++))
-    done < "$pinned_file"
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要取消固定的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local entry="${pinned_map[$choice]}"
-        
-        grep -v "^$entry$" "$pinned_file" > "$pinned_file.tmp"
-        mv "$pinned_file.tmp" "$pinned_file"
-        
-        IFS=':' read -r script_path display_name <<< "$entry"
-        
-        print_success "脚本 '$display_name' 已成功从主菜单移除"
-    else
-        print_error "无效选项"
-    fi
-    
-    press_enter
-}
-
-# 查看已固定脚本
-view_pinned_scripts() {
-    print_title
-    echo -e "${YELLOW}已固定的脚本:${RESET}"
-    
-    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
-    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
-        print_warning "没有找到已固定的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    
-    while IFS=: read -r script_path display_name; do
-        echo "$i) $display_name ($(basename "$script_path"))"
-        ((i++))
-    done < "$pinned_file"
-    
-    echo ""
-    press_enter
-}
-
-# 为脚本创建快捷命令
-create_script_shortcut() {
-    print_title
-    echo -e "${YELLOW}为脚本创建快捷命令:${RESET}"
-    
-    local scripts=($(scan_scripts))
-    if [ ${#scripts[@]} -eq 0 ]; then
-        print_warning "没有找到可用的脚本"
-        press_enter
-        return
-    fi
-    
-    local i=1
-    declare -A script_map
-    
-    for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc ($(basename "$script_path"))"
-        script_map[$i]="$script_path"
-        ((i++))
-    done
-    
-    echo "0) 返回上一级菜单"
-    echo ""
-    
-    read -p "请选择要创建快捷方式的脚本 [0-$((i-1))]: " choice
-    
-    if [[ $choice -eq 0 ]]; then
-        return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
-        local script_path="${script_map[$choice]}"
-        local script_name=$(basename "$script_path" .sh)
-        
-        read -p "请输入快捷命令名称 (默认: $script_name): " shortcut_name
-        if [ -z "$shortcut_name" ]; then
-            shortcut_name="$script_name"
-        fi
-        
-        local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
-        
-        if command -v "$shortcut_name" &> /dev/null; then
-            print_warning "命令 '$shortcut_name' 已存在，可能会导致冲突。"
-            read -p "是否继续? (y/n): " continue_anyway
-            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
-                print_warning "快捷命令创建已取消"
-                press_enter
-                return
-            fi
-            
-            rm -f "$PREFIX/bin/$shortcut_name"
-        fi
-        
-        cat > "$PREFIX/bin/$shortcut_name" << EOF
-#!/data/data/com.termux/files/usr/bin/bash
-# 脚本快捷方式
-# 目标: $abs_script_path
-
-cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
-EOF
-        chmod +x "$PREFIX/bin/$shortcut_name"
-        
-        mkdir -p "$SCRIPT_DIR/shortcuts"
-        echo "$shortcut_name:$abs_script_path" >> "$SCRIPT_DIR/shortcuts/shortcuts.list"
-        
-        print_success "快捷命令 '$shortcut_name' 已创建"
-    else
-        print_error "无效选项"
+        print_error "插件不存在或没有执行权限"
     fi
     
     press_enter
@@ -702,14 +465,14 @@ show_version_info() {
     echo "安装路径: $SCRIPT_DIR"
     
     local script_count=$(find "$SCRIPTS_DIR" -type f -name "*.sh" | wc -l)
-    echo "已安装脚本: $script_count"
+    echo "已安装插件: $script_count"
     
     local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
     if [ -f "$pinned_file" ]; then
         local pinned_count=$(wc -l < "$pinned_file")
-        echo "已固定脚本: $pinned_count"
+        echo "已固定插件: $pinned_count"
     else
-        echo "已固定脚本: 0"
+        echo "已固定插件: 0"
     fi
     
     if [ -f "$SCRIPT_DIR/.initialized" ]; then
@@ -800,6 +563,587 @@ EOF
     press_enter
 }
 
+# ==================== 新的插件管理功能 ====================
+
+# 插件管理菜单
+plugin_management() {
+    while true; do
+        print_title
+        echo -e "${YELLOW}插件管理:${RESET}"
+        echo "1) 已安装插件列表"
+        echo "2) 安装新插件"
+        echo "3) 管理快捷命令"
+        echo "4) 管理主页固定插件" 
+        echo "0) 返回主菜单"
+        echo ""
+        
+        read -p "请选择 [0-4]: " choice
+        
+        case $choice in
+            1) show_installed_plugins ;;
+            2) install_new_plugins ;;
+            3) manage_shortcuts ;;
+            4) manage_pinned_plugins ;;
+            0) return ;;
+            *) 
+                print_error "无效选项"
+                press_enter
+                ;;
+        esac
+    done
+}
+
+# 显示已安装插件
+show_installed_plugins() {
+    print_title
+    echo -e "${YELLOW}已安装插件列表:${RESET}"
+    
+    local scripts=($(scan_installed_scripts))
+    if [ ${#scripts[@]} -eq 0 ]; then
+        print_warning "没有找到已安装的插件"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    declare -A script_map
+    
+    for script_info in "${scripts[@]}"; do
+        IFS=':' read -r script_path script_desc <<< "$script_info"
+        echo "$i) $script_desc ($(basename "$script_path"))"
+        script_map[$i]="$script_path"
+        ((i++))
+    done
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要执行的插件 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        execute_script "${script_map[$choice]}"
+    else
+        print_error "无效选项"
+        press_enter
+    fi
+}
+
+# 从仓库安装新插件
+install_new_plugins() {
+    print_title
+    echo -e "${YELLOW}安装新插件:${RESET}"
+    
+    # 检查依赖
+    check_dependencies
+    
+    # 首先确保仓库已克隆，以便查看可用插件
+    if [ ! -d "$SCRIPTS_DIR/.git" ]; then
+        print_info "正在获取可用插件列表..."
+        
+        local temp_dir="/data/data/com.termux/files/usr/tmp/scripts_temp_$$"
+        mkdir -p "$temp_dir"
+        
+        # 克隆仓库以获取最新插件
+        GIT_TERMINAL_PROMPT=0 git clone "$REPO_URL" "$temp_dir" 2>/dev/null
+        
+        if [ $? -ne 0 ]; then
+            print_error "无法连接到插件仓库，请检查网络或仓库地址"
+            rm -rf "$temp_dir"
+            press_enter
+            return
+        fi
+        
+        # 如果存在scripts目录，则使用它
+        if [ -d "$temp_dir/scripts" ]; then
+            temp_dir="$temp_dir/scripts"
+        fi
+    else
+        print_info "正在更新可用插件列表..."
+        # 仓库已存在，执行pull操作
+        cd "$SCRIPTS_DIR"
+        GIT_TERMINAL_PROMPT=0 git pull 2>/dev/null
+        temp_dir="$SCRIPTS_DIR"
+    fi
+    
+    # 扫描可用插件
+    local available_plugins=()
+    local i=1
+    declare -A plugin_map
+    
+    while IFS= read -r script; do
+        if [ -f "$script" ]; then
+            local name=$(basename "$script")
+            local desc=$(grep -m 1 "# Description:" "$script" | cut -d ':' -f 2- | sed 's/^[[:space:]]*//')
+            
+            if [ -z "$desc" ]; then
+                desc="$name"
+            fi
+            
+            echo "$i) $desc ($(basename "$script"))"
+            plugin_map[$i]="$script"
+            ((i++))
+        fi
+    done < <(find "$temp_dir" -type f -name "*.sh")
+    
+    if [ $i -eq 1 ]; then
+        print_warning "仓库中没有找到可用的插件"
+        # 如果是临时目录，则清理
+        if [ "$temp_dir" != "$SCRIPTS_DIR" ]; then
+            rm -rf "$(dirname "$temp_dir")"
+        fi
+        press_enter
+        return
+    fi
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要安装的插件 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        # 如果是临时目录，则清理
+        if [ "$temp_dir" != "$SCRIPTS_DIR" ]; then
+            rm -rf "$(dirname "$temp_dir")"
+        fi
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        local plugin_path="${plugin_map[$choice]}"
+        local plugin_name=$(basename "$plugin_path")
+        
+        # 安装插件
+        print_info "正在安装插件 '$plugin_name'..."
+        
+        # 确保脚本目录存在
+        mkdir -p "$SCRIPTS_DIR"
+        
+        # 复制插件到脚本目录
+        cp "$plugin_path" "$SCRIPTS_DIR/"
+        chmod +x "$SCRIPTS_DIR/$plugin_name"
+        
+        print_success "插件 '$plugin_name' 已成功安装"
+        
+        # 询问是否创建快捷命令
+        read -p "是否为此插件创建快捷命令? (y/n): " create_shortcut
+        if [[ "$create_shortcut" =~ ^[Yy]$ ]]; then
+            local script_name=$(basename "$plugin_name" .sh)
+            read -p "请输入快捷命令名称 (默认: $script_name): " shortcut_name
+            if [ -z "$shortcut_name" ]; then
+                shortcut_name="$script_name"
+            fi
+            
+            if command -v "$shortcut_name" &> /dev/null; then
+                print_warning "命令 '$shortcut_name' 已存在，可能会导致冲突。"
+                read -p "是否继续? (y/n): " continue_anyway
+                if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                    print_warning "快捷命令创建已取消"
+                else
+                    create_script_shortcut_internal "$SCRIPTS_DIR/$plugin_name" "$shortcut_name"
+                fi
+            else
+                create_script_shortcut_internal "$SCRIPTS_DIR/$plugin_name" "$shortcut_name"
+            fi
+        fi
+        
+        # 询问是否固定到主菜单
+        read -p "是否将此插件固定到主菜单? (y/n): " pin_to_menu
+        if [[ "$pin_to_menu" =~ ^[Yy]$ ]]; then
+            read -p "请输入显示在菜单中的名称 (默认: $plugin_name): " display_name
+            if [ -z "$display_name" ]; then
+                display_name="$plugin_name"
+            fi
+            
+            mkdir -p "$SCRIPT_DIR/pinned"
+            echo "$SCRIPTS_DIR/$plugin_name:$display_name" >> "$SCRIPT_DIR/pinned/scripts.list"
+            
+            print_success "插件 '$plugin_name' 已固定到主菜单"
+        fi
+    else
+        print_error "无效选项"
+    fi
+    
+    # 如果是临时目录，则清理
+    if [ "$temp_dir" != "$SCRIPTS_DIR" ]; then
+        rm -rf "$(dirname "$temp_dir")"
+    fi
+    
+    press_enter
+}
+
+# 创建脚本快捷方式的内部函数
+create_script_shortcut_internal() {
+    local script_path="$1"
+    local shortcut_name="$2"
+    
+    local abs_script_path=$(readlink -f "$script_path" 2>/dev/null || realpath "$script_path" 2>/dev/null || echo "$script_path")
+    
+    # 如果已存在，先移除
+    rm -f "$PREFIX/bin/$shortcut_name"
+    
+    # 在bin中创建快捷方式
+    cat > "$PREFIX/bin/$shortcut_name" << EOF
+#!/data/data/com.termux/files/usr/bin/bash
+# 插件快捷方式
+# 目标: $abs_script_path
+
+cd "$(dirname "$abs_script_path")" && exec "./$(basename "$abs_script_path")" "\$@"
+EOF
+    chmod +x "$PREFIX/bin/$shortcut_name"
+    
+    # 存储快捷方式信息
+    mkdir -p "$SCRIPT_DIR/shortcuts"
+    
+    # 如果快捷方式已存在，先移除旧条目
+    if [ -f "$SCRIPT_DIR/shortcuts/shortcuts.list" ]; then
+        grep -v "^$shortcut_name:" "$SCRIPT_DIR/shortcuts/shortcuts.list" > "$SCRIPT_DIR/shortcuts/shortcuts.list.tmp"
+        mv "$SCRIPT_DIR/shortcuts/shortcuts.list.tmp" "$SCRIPT_DIR/shortcuts/shortcuts.list"
+    fi
+    
+    echo "$shortcut_name:$abs_script_path" >> "$SCRIPT_DIR/shortcuts/shortcuts.list"
+    
+    print_success "快捷命令 '$shortcut_name' 已创建"
+}
+
+# 管理快捷命令
+manage_shortcuts() {
+    while true; do
+        print_title
+        echo -e "${YELLOW}快捷命令管理:${RESET}"
+        echo "1) 查看现有快捷命令"
+        echo "2) 创建新快捷命令"
+        echo "3) 删除快捷命令"
+        echo "0) 返回上一级菜单"
+        echo ""
+        
+        read -p "请选择 [0-3]: " choice
+        
+        case $choice in
+            1) view_shortcuts ;;
+            2) create_shortcut ;;
+            3) remove_shortcut ;;
+            0) return ;;
+            *) 
+                print_error "无效选项"
+                press_enter
+                ;;
+        esac
+    done
+}
+
+# 查看现有快捷命令
+view_shortcuts() {
+    print_title
+    echo -e "${YELLOW}现有快捷命令:${RESET}"
+    
+    local shortcuts_file="$SCRIPT_DIR/shortcuts/shortcuts.list"
+    if [ ! -f "$shortcuts_file" ] || [ ! -s "$shortcuts_file" ]; then
+        print_warning "没有找到快捷命令"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    
+    while IFS=: read -r shortcut_name script_path; do
+        if [ -f "$PREFIX/bin/$shortcut_name" ]; then
+            echo "$i) $shortcut_name -> $(basename "$script_path")"
+            ((i++))
+        fi
+    done < "$shortcuts_file"
+    
+    if [ $i -eq 1 ]; then
+        print_warning "没有找到有效的快捷命令"
+    fi
+    
+    echo ""
+    press_enter
+}
+
+# 创建新快捷命令
+create_shortcut() {
+    print_title
+    echo -e "${YELLOW}为插件创建快捷命令:${RESET}"
+    
+    local scripts=($(scan_installed_scripts))
+    if [ ${#scripts[@]} -eq 0 ]; then
+        print_warning "没有找到可用的插件"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    declare -A script_map
+    
+    for script_info in "${scripts[@]}"; do
+        IFS=':' read -r script_path script_desc <<< "$script_info"
+        echo "$i) $script_desc ($(basename "$script_path"))"
+        script_map[$i]="$script_path"
+        ((i++))
+    done
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要创建快捷方式的插件 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        local script_path="${script_map[$choice]}"
+        local script_name=$(basename "$script_path" .sh)
+        
+        read -p "请输入快捷命令名称 (默认: $script_name): " shortcut_name
+        if [ -z "$shortcut_name" ]; then
+            shortcut_name="$script_name"
+        fi
+        
+        if command -v "$shortcut_name" &> /dev/null; then
+            print_warning "命令 '$shortcut_name' 已存在，可能会导致冲突。"
+            read -p "是否继续? (y/n): " continue_anyway
+            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                print_warning "快捷命令创建已取消"
+                press_enter
+                return
+            fi
+        fi
+        
+        create_script_shortcut_internal "$script_path" "$shortcut_name"
+    else
+        print_error "无效选项"
+    fi
+    
+    press_enter
+}
+
+# 删除快捷命令
+remove_shortcut() {
+    print_title
+    echo -e "${YELLOW}删除快捷命令:${RESET}"
+    
+    local shortcuts_file="$SCRIPT_DIR/shortcuts/shortcuts.list"
+    if [ ! -f "$shortcuts_file" ] || [ ! -s "$shortcuts_file" ]; then
+        print_warning "没有找到快捷命令"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    declare -A shortcut_map
+    
+    while IFS=: read -r shortcut_name script_path; do
+        if [ -f "$PREFIX/bin/$shortcut_name" ]; then
+            echo "$i) $shortcut_name -> $(basename "$script_path")"
+            shortcut_map[$i]="$shortcut_name:$script_path"
+            ((i++))
+        fi
+    done < "$shortcuts_file"
+    
+    if [ $i -eq 1 ]; then
+        print_warning "没有找到有效的快捷命令"
+        press_enter
+        return
+    fi
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要删除的快捷命令 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        local entry="${shortcut_map[$choice]}"
+        IFS=':' read -r shortcut_name script_path <<< "$entry"
+        
+        read -p "确定要删除快捷命令 '$shortcut_name'? (y/n): " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            # 删除快捷命令文件
+            rm -f "$PREFIX/bin/$shortcut_name"
+            
+            # 从列表中移除
+            grep -v "^$shortcut_name:" "$shortcuts_file" > "$shortcuts_file.tmp"
+            mv "$shortcuts_file.tmp" "$shortcuts_file"
+            
+            print_success "快捷命令 '$shortcut_name' 已成功删除"
+        else
+            print_warning "删除已取消"
+        fi
+    else
+        print_error "无效选项"
+    fi
+    
+    press_enter
+}
+
+# 管理主页固定插件
+manage_pinned_plugins() {
+    while true; do
+        print_title
+        echo -e "${YELLOW}主页固定插件管理:${RESET}"
+        echo "1) 查看已固定插件"
+        echo "2) 添加固定插件"
+        echo "3) 移除固定插件"
+        echo "0) 返回上一级菜单"
+        echo ""
+        
+        read -p "请选择 [0-3]: " choice
+        
+        case $choice in
+            1) view_pinned_plugins ;;
+            2) add_pinned_plugin ;;
+            3) remove_pinned_plugin ;;
+            0) return ;;
+            *) 
+                print_error "无效选项"
+                press_enter
+                ;;
+        esac
+    done
+}
+
+# 查看已固定插件
+view_pinned_plugins() {
+    print_title
+    echo -e "${YELLOW}已固定的插件:${RESET}"
+    
+    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
+    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
+        print_warning "没有找到已固定的插件"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    
+    while IFS=: read -r script_path display_name; do
+        if [ -f "$script_path" ] && [ -x "$script_path" ]; then
+            echo "$i) $display_name ($(basename "$script_path"))"
+            ((i++))
+        fi
+    done < "$pinned_file"
+    
+    if [ $i -eq 1 ]; then
+        print_warning "没有找到有效的固定插件"
+    fi
+    
+    echo ""
+    press_enter
+}
+
+# 添加固定插件
+add_pinned_plugin() {
+    print_title
+    echo -e "${YELLOW}添加固定插件到主页:${RESET}"
+    
+    local scripts=($(scan_installed_scripts))
+    if [ ${#scripts[@]} -eq 0 ]; then
+        print_warning "没有找到可用的插件"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    declare -A script_map
+    
+    for script_info in "${scripts[@]}"; do
+        IFS=':' read -r script_path script_desc <<< "$script_info"
+        echo "$i) $script_desc ($(basename "$script_path"))"
+        script_map[$i]="$script_path"
+        ((i++))
+    done
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要固定的插件 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        local script_path="${script_map[$choice]}"
+        local script_name=$(basename "$script_path")
+        
+        # 检查是否已经固定
+        local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
+        if [ -f "$pinned_file" ]; then
+            if grep -q "^$script_path:" "$pinned_file"; then
+                print_warning "该插件已经固定在主页"
+                press_enter
+                return
+            fi
+        fi
+        
+        read -p "请输入显示在主页的名称 (默认: $script_name): " display_name
+        if [ -z "$display_name" ]; then
+            display_name="$script_name"
+        fi
+        
+        mkdir -p "$SCRIPT_DIR/pinned"
+        echo "$script_path:$display_name" >> "$SCRIPT_DIR/pinned/scripts.list"
+        
+        print_success "插件 '$script_name' 已成功固定到主页"
+    else
+        print_error "无效选项"
+    fi
+    
+    press_enter
+}
+
+# 移除固定插件
+remove_pinned_plugin() {
+    print_title
+    echo -e "${YELLOW}从主页移除固定插件:${RESET}"
+    
+    local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
+    if [ ! -f "$pinned_file" ] || [ ! -s "$pinned_file" ]; then
+        print_warning "没有找到已固定的插件"
+        press_enter
+        return
+    fi
+    
+    local i=1
+    declare -A pinned_map
+    
+    while IFS=: read -r script_path display_name; do
+        if [ -f "$script_path" ] && [ -x "$script_path" ]; then
+            echo "$i) $display_name ($(basename "$script_path"))"
+            pinned_map[$i]="$script_path:$display_name"
+            ((i++))
+        fi
+    done < "$pinned_file"
+    
+    if [ $i -eq 1 ]; then
+        print_warning "没有找到有效的固定插件"
+        press_enter
+        return
+    }
+    
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择要移除的固定插件 [0-$((i-1))]: " choice
+    
+    if [[ $choice -eq 0 ]]; then
+        return
+    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+        local entry="${pinned_map[$choice]}"
+        
+        # 从固定列表中删除条目
+        grep -v "^$entry$" "$pinned_file" > "$pinned_file.tmp"
+        mv "$pinned_file.tmp" "$pinned_file"
+        
+        # 提取显示名称以用于成功消息
+        IFS=':' read -r script_path display_name <<< "$entry"
+        
+        print_success "插件 '$display_name' 已成功从主页移除"
+    else
+        print_error "无效选项"
+    fi
+    
+    press_enter
+}
+
 # 主菜单
 main_menu() {
     while true; do
@@ -808,29 +1152,33 @@ main_menu() {
         echo "1) 切换软件源"
         echo "2) 更新Termux环境"
         echo "3) 安装基本环境"
-        echo "4) 脚本管理"
-        echo "5) 执行脚本"
-        echo "6) 设置"
+        echo "4) 插件管理"
+        echo "5) 设置"
         echo "0) 退出"
         echo ""
         
-        # 显示已固定的脚本
+        # 显示已固定的插件
         local pinned_file="$SCRIPT_DIR/pinned/scripts.list"
+        local pinned_count=0
+        
         if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
-            echo -e "${YELLOW}已固定的脚本:${RESET}"
-            local pinned_count=0
+            echo -e "${YELLOW}快速启动:${RESET}"
+            
             while IFS=: read -r script_path display_name; do
                 if [ -f "$script_path" ] && [ -x "$script_path" ]; then
                     ((pinned_count++))
-                    echo "$((pinned_count+6))) $display_name"
+                    echo "$((pinned_count+5))) $display_name"
                 fi
             done < "$pinned_file"
-            echo ""
+            
+            if [ $pinned_count -gt 0 ]; then
+                echo ""
+            fi
         fi
         
-        echo -n "请选择 [0-6"
-        if [ "$pinned_count" -gt 0 ]; then
-            echo -n "-$((pinned_count+6))"
+        echo -n "请选择 [0-5"
+        if [ $pinned_count -gt 0 ]; then
+            echo -n "-$((pinned_count+5))"
         fi
         echo -n "]: "
         read choice
@@ -839,48 +1187,13 @@ main_menu() {
             1) switch_mirror ;;
             2) update_termux ;;
             3) install_basic_environment ;;
-            4) manage_script_repository ;;
-            5) 
-                scripts=($(scan_scripts))
-                if [ ${#scripts[@]} -eq 0 ]; then
-                    print_warning "没有找到可执行的脚本"
-                    press_enter
-                    continue
-                fi
-                
-                print_title
-                echo -e "${YELLOW}可用脚本:${RESET}"
-                
-                local i=1
-                declare -A script_map
-                
-                for script_info in "${scripts[@]}"; do
-                    IFS=':' read -r script_path script_desc <<< "$script_info"
-                    echo "$i) $script_desc"
-                    script_map[$i]="$script_path"
-                    ((i++))
-                done
-                
-                echo "0) 返回主菜单"
-                echo ""
-                
-                read -p "请选择要执行的脚本 [0-$((i-1))]: " script_choice
-                
-                if [[ $script_choice -eq 0 ]]; then
-                    continue
-                elif [[ $script_choice -ge 1 && $script_choice -lt $i ]]; then
-                    execute_script "${script_map[$script_choice]}"
-                else
-                    print_error "无效选项"
-                    press_enter
-                fi
-                ;;
-            6) settings_menu ;;
+            4) plugin_management ;;
+            5) settings_menu ;;
             0) exit 0 ;;
             *)
-                # 检查是否选择了固定脚本
+                # 检查是否选择了固定插件
                 if [ -f "$pinned_file" ] && [ -s "$pinned_file" ] && [ -n "$pinned_count" ]; then
-                    local pinned_index=$((choice-6))
+                    local pinned_index=$((choice-5))
                     if [ $pinned_index -ge 1 ] && [ $pinned_index -le $pinned_count ]; then
                         local j=0
                         while IFS=: read -r script_path display_name; do
