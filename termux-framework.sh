@@ -19,6 +19,7 @@ SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
 REPO_URL="https://github.com/Ambition-io/termux-framework.git"
+SCRIPTS_REPO_URL=""
 VERSION="1.0.3"
 
 # 确保目录存在
@@ -30,8 +31,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
 #!/data/data/com.termux/files/usr/bin/bash
 # 配置文件
 
-# 仓库URL
+# 框架仓库URL
 REPO_URL="$REPO_URL"
+
+# 脚本仓库URL (可以与框架仓库不同)
+SCRIPTS_REPO_URL="$REPO_URL"
 
 # 默认镜像源（清华大学镜像）
 DEFAULT_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/termux"
@@ -78,6 +82,13 @@ print_warning() {
 # 打印错误
 print_error() {
     echo -e "${RED}[错误]${RESET} $1"
+}
+
+# 打印调试信息（仅在DEBUG模式下显示）
+print_debug() {
+    if [ "${DEBUG:-false}" = true ]; then
+        echo -e "${MAGENTA}[调试]${RESET} $1"
+    fi
 }
 
 # 按键继续
@@ -145,15 +156,32 @@ update_framework() {
     press_enter
 }
 
-# 扫描可用脚本
+# 扫描可用脚本 - 修改版，只扫描scripts目录下的脚本
 scan_scripts() {
     local pinned_only=${1:-false}
     local scripts=()
     
-    # 扫描脚本目录
+    # 确保脚本目录存在
+    if [ ! -d "$SCRIPTS_DIR" ]; then
+        mkdir -p "$SCRIPTS_DIR"
+        print_debug "创建脚本目录: $SCRIPTS_DIR"
+    fi
+    
     if [ -d "$SCRIPTS_DIR" ]; then
+        print_debug "开始扫描脚本目录: $SCRIPTS_DIR"
+        
+        # 使用find找到所有.sh文件，但排除根目录下的框架脚本
+        local script_files=()
         while IFS= read -r script; do
-            if [ -x "$script" ]; then
+            script_files+=("$script")
+            print_debug "找到脚本: $script"
+        done < <(find "$SCRIPTS_DIR" -type f -name "*.sh" 2>/dev/null)
+        
+        print_debug "找到脚本数量: ${#script_files[@]}"
+        
+        # 处理找到的每个脚本
+        for script in "${script_files[@]}"; do
+            if [ -f "$script" ] && [ -x "$script" ]; then
                 # 提取脚本名称和描述
                 local name=$(basename "$script")
                 local desc=$(grep -m 1 "# Description:" "$script" | cut -d ':' -f 2- | sed 's/^[[:space:]]*//')
@@ -180,7 +208,7 @@ scan_scripts() {
                     scripts+=("$script:$desc")
                 fi
             fi
-        done < <(find "$SCRIPTS_DIR" -type f -name "*.sh")
+        done
     fi
     
     echo "${scripts[@]}"
@@ -481,23 +509,62 @@ script_repository_menu() {
     done
 }
 
-# 更新脚本仓库
+# 更新脚本仓库 - 修改版，提供选择不同脚本仓库的选项
 update_script_repository() {
     print_title
+    echo -e "${CYAN}更新脚本仓库${RESET}\n"
+    
+    echo "1) 使用默认仓库 (${SCRIPTS_REPO_URL:-$REPO_URL})"
+    echo "2) 使用其他仓库"
+    echo "0) 返回上一级菜单"
+    echo ""
+    
+    read -p "请选择 [0-2]: " choice
+    
+    case $choice in
+        1) 
+            local repo_url="${SCRIPTS_REPO_URL:-$REPO_URL}"
+            print_info "使用仓库: $repo_url"
+            ;;
+        2)
+            read -p "请输入脚本仓库URL: " repo_url
+            if [ -z "$repo_url" ]; then
+                print_error "未提供有效的仓库URL"
+                press_enter
+                return
+            fi
+            
+            # 更新配置文件中的脚本仓库URL
+            sed -i "s|SCRIPTS_REPO_URL=.*|SCRIPTS_REPO_URL=\"$repo_url\"|" "$CONFIG_FILE"
+            source "$CONFIG_FILE"
+            ;;
+        0)
+            return
+            ;;
+        *)
+            print_error "无效选项"
+            press_enter
+            return
+            ;;
+    esac
+    
     print_info "正在从仓库拉取脚本..."
+    
+    # 确保目录存在
+    mkdir -p "$SCRIPTS_DIR"
     
     if [ -d "$SCRIPTS_DIR/.git" ]; then
         cd "$SCRIPTS_DIR"
         git pull
     else
-        # 假设脚本仓库可能与框架仓库不同
-        read -p "请输入脚本仓库URL (直接回车使用默认): " scripts_repo
-        if [ -z "$scripts_repo" ]; then
-            scripts_repo="$REPO_URL"
-        fi
-        
         rm -rf "$SCRIPTS_DIR"
-        git clone "$scripts_repo" "$SCRIPTS_DIR"
+        git clone "$repo_url" "$SCRIPTS_DIR"
+        
+        # 如果仓库根目录有scripts子目录，则使用该子目录
+        if [ -d "$SCRIPTS_DIR/scripts" ]; then
+            print_info "检测到scripts子目录，使用该目录作为脚本目录"
+            mv "$SCRIPTS_DIR/scripts"/* "$SCRIPTS_DIR/"
+        fi
     fi
     
     # 确保所有脚本有执行权限
@@ -507,15 +574,16 @@ update_script_repository() {
     press_enter
 }
 
-# 浏览可用脚本
+# 浏览可用脚本 - 修改版，解决卡死问题
 browse_available_scripts() {
     while true; do
         print_title
         echo -e "${YELLOW}可用脚本列表:${RESET}\n"
         
         # 扫描所有脚本
-        local scripts=($(scan_scripts false))
-        if [ ${#scripts[@]} -eq 0 ]; then
+        local script_array=($(scan_scripts false))
+        
+        if [ ${#script_array[@]} -eq 0 ]; then
             print_warning "没有找到可用的脚本"
             press_enter
             return
@@ -524,27 +592,38 @@ browse_available_scripts() {
         local i=1
         declare -A script_map
         
-        for script_info in "${scripts[@]}"; do
-            IFS=':' read -r script_path script_desc <<< "$script_info"
-            local name=$(basename "$script_path")
-            local pin_status="[ ]"
-            local shortcut=""
-            
-            # 检查是否已固定
-            if is_script_pinned "$script_path"; then
-                pin_status="[✓]"
+        # 遍历每个脚本信息
+        for script_info in "${script_array[@]}"; do
+            if [ -n "$script_info" ]; then  # 确保脚本信息不为空
+                IFS=':' read -r script_path script_desc <<< "$script_info"
+                
+                if [ -f "$script_path" ]; then  # 确保脚本文件存在
+                    local name=$(basename "$script_path")
+                    local pin_status="[ ]"
+                    local shortcut=""
+                    
+                    # 检查是否已固定
+                    if is_script_pinned "$script_path"; then
+                        pin_status="[✓]"
+                    fi
+                    
+                    # 检查是否有快捷方式
+                    if local found_shortcut=$(find_script_shortcut "$script_path") && [ -n "$found_shortcut" ]; then
+                        shortcut=" → [$found_shortcut]"
+                    fi
+                    
+                    echo "$i) $pin_status $script_desc ($name)$shortcut"
+                    script_map[$i]="$script_path"
+                    ((i++))
+                fi
             fi
-            
-            # 检查是否有快捷方式
-            local found_shortcut=$(find_script_shortcut "$script_path")
-            if [ $? -eq 0 ]; then
-                shortcut=" → [$found_shortcut]"
-            fi
-            
-            echo "$i) $pin_status $script_desc ($name)$shortcut"
-            script_map[$i]="$script_path"
-            ((i++))
         done
+        
+        if [ $i -eq 1 ]; then
+            print_warning "没有找到可用的脚本"
+            press_enter
+            return
+        fi
         
         echo ""
         echo "a) 固定/取消固定选中的脚本"
@@ -558,32 +637,38 @@ browse_available_scripts() {
         if [[ $choice =~ ^[0-9]+$ && $choice -ge 1 && $choice -lt $i ]]; then
             # 选择了某个脚本
             local selected_script="${script_map[$choice]}"
-            local script_name=$(basename "$selected_script")
             
-            print_title
-            echo -e "${CYAN}已选择脚本: $script_name${RESET}\n"
-            echo "1) 执行脚本"
-            echo "2) 固定/取消固定到主菜单"
-            echo "3) 创建/删除快捷方式"
-            echo "0) 返回"
-            echo ""
-            
-            read -p "请选择操作 [0-3]: " script_action
-            
-            case $script_action in
-                1) execute_script "$selected_script" ;;
-                2) toggle_pin_script "$selected_script" ;;
-                3) toggle_script_shortcut "$selected_script" ;;
-                0) continue ;;
-                *)
-                    print_error "无效选项"
-                    press_enter
-                    ;;
-            esac
+            if [ -n "$selected_script" ] && [ -f "$selected_script" ]; then
+                local script_name=$(basename "$selected_script")
+                
+                print_title
+                echo -e "${CYAN}已选择脚本: $script_name${RESET}\n"
+                echo "1) 执行脚本"
+                echo "2) 固定/取消固定到主菜单"
+                echo "3) 创建/删除快捷方式"
+                echo "0) 返回"
+                echo ""
+                
+                read -p "请选择操作 [0-3]: " script_action
+                
+                case $script_action in
+                    1) execute_script "$selected_script" ;;
+                    2) toggle_pin_script "$selected_script" ;;
+                    3) toggle_script_shortcut "$selected_script" ;;
+                    0) continue ;;
+                    *)
+                        print_error "无效选项"
+                        press_enter
+                        ;;
+                esac
+            else
+                print_error "选中的脚本不存在"
+                press_enter
+            fi
         elif [ "$choice" = "a" ]; then
             # 固定/取消固定脚本
             read -p "请输入要固定/取消固定的脚本编号: " script_num
-            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i ]]; then
+            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i && -n "${script_map[$script_num]}" ]]; then
                 toggle_pin_script "${script_map[$script_num]}"
             else
                 print_error "无效的脚本编号"
@@ -592,7 +677,7 @@ browse_available_scripts() {
         elif [ "$choice" = "b" ]; then
             # 创建/删除脚本快捷方式
             read -p "请输入要处理的脚本编号: " script_num
-            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i ]]; then
+            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i && -n "${script_map[$script_num]}" ]]; then
                 toggle_script_shortcut "${script_map[$script_num]}"
             else
                 print_error "无效的脚本编号"
@@ -601,7 +686,7 @@ browse_available_scripts() {
         elif [ "$choice" = "c" ]; then
             # 执行选中的脚本
             read -p "请输入要执行的脚本编号: " script_num
-            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i ]]; then
+            if [[ $script_num =~ ^[0-9]+$ && $script_num -ge 1 && $script_num -lt $i && -n "${script_map[$script_num]}" ]]; then
                 execute_script "${script_map[$script_num]}"
             else
                 print_error "无效的脚本编号"
@@ -619,6 +704,13 @@ browse_available_scripts() {
 # 切换脚本的固定状态
 toggle_pin_script() {
     local script_path="$1"
+    
+    if [ ! -f "$script_path" ]; then
+        print_error "脚本不存在: $script_path"
+        press_enter
+        return
+    }
+    
     local script_name=$(basename "$script_path")
     local script_desc=$(grep -m 1 "# Description:" "$script_path" | cut -d ':' -f 2- | sed 's/^[[:space:]]*//')
     
@@ -646,10 +738,18 @@ toggle_pin_script() {
 # 切换脚本的快捷方式状态
 toggle_script_shortcut() {
     local script_path="$1"
-    local script_name=$(basename "$script_path" .sh)
-    local found_shortcut=$(find_script_shortcut "$script_path")
     
-    if [ $? -eq 0 ]; then
+    if [ ! -f "$script_path" ]; then
+        print_error "脚本不存在: $script_path"
+        press_enter
+        return
+    }
+    
+    local script_name=$(basename "$script_path" .sh)
+    local found_shortcut=$(find_script_shortcut "$script_path" 2>/dev/null)
+    local shortcut_exists=$?
+    
+    if [ $shortcut_exists -eq 0 ] && [ -n "$found_shortcut" ]; then
         print_info "发现快捷方式: $found_shortcut"
         read -p "是否要删除此快捷方式? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
@@ -694,12 +794,26 @@ manage_pinned_scripts() {
         fi
         
         local i=1
+        local valid_scripts=false
+        
         for pinned in "${PINNED_SCRIPTS[@]}"; do
             IFS=':' read -r script_path display_name <<< "$pinned"
-            local script_name=$(basename "$script_path")
-            echo "$i) $display_name ($script_name)"
-            ((i++))
+            if [ -f "$script_path" ]; then
+                local script_name=$(basename "$script_path")
+                echo "$i) $display_name ($script_name)"
+                ((i++))
+                valid_scripts=true
+            fi
         done
+        
+        if [ "$valid_scripts" = false ]; then
+            print_warning "没有有效的固定脚本"
+            # 清空无效的固定脚本
+            PINNED_SCRIPTS=()
+            update_pinned_scripts_config
+            press_enter
+            return
+        fi
         
         echo ""
         echo "a) 移除固定脚本"
@@ -765,7 +879,7 @@ manage_pinned_scripts() {
     done
 }
 
-# 管理脚本快捷方式
+# 管理脚本快捷方式 - 修改版，解决卡死问题
 manage_script_shortcuts() {
     print_title
     echo -e "${YELLOW}当前脚本快捷方式:${RESET}\n"
@@ -774,18 +888,24 @@ manage_script_shortcuts() {
     local i=1
     declare -A shortcut_map
     
-    # 查找所有脚本的快捷方式
+    # 先获取所有脚本路径
+    local script_files=()
     while IFS= read -r script; do
-        if [ -x "$script" ]; then
-            local shortcut=$(find_script_shortcut "$script")
-            if [ $? -eq 0 ]; then
-                local script_name=$(basename "$script")
-                shortcuts+=("$i) $shortcut → $script_name")
-                shortcut_map[$i]="$shortcut:$script"
-                ((i++))
-            fi
+        if [ -f "$script" ] && [ -x "$script" ]; then
+            script_files+=("$script")
         fi
-    done < <(find "$SCRIPTS_DIR" -type f -name "*.sh")
+    done < <(find "$SCRIPTS_DIR" -type f -name "*.sh" 2>/dev/null)
+    
+    # 查找每个脚本的快捷方式
+    for script in "${script_files[@]}"; do
+        local shortcut=$(find_script_shortcut "$script" 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$shortcut" ]; then
+            local script_name=$(basename "$script")
+            shortcuts+=("$i) $shortcut → $script_name")
+            shortcut_map[$i]="$shortcut:$script"
+            ((i++))
+        fi
+    done
     
     if [ ${#shortcuts[@]} -eq 0 ]; then
         print_warning "没有找到脚本快捷方式"
@@ -808,7 +928,7 @@ manage_script_shortcuts() {
     
     if [ "$choice" = "a" ]; then
         read -p "请输入要删除的快捷方式编号: " remove_num
-        if [[ $remove_num =~ ^[0-9]+$ && $remove_num -ge 1 && $remove_num -lt $i ]]; then
+        if [[ $remove_num =~ ^[0-9]+$ && $remove_num -ge 1 && $remove_num -lt $i ]] && [ -n "${shortcut_map[$remove_num]}" ]; then
             IFS=':' read -r shortcut_name _ <<< "${shortcut_map[$remove_num]}"
             remove_script_shortcut "$shortcut_name"
         else
@@ -816,7 +936,7 @@ manage_script_shortcuts() {
         fi
     elif [ "$choice" = "b" ]; then
         read -p "请输入要重命名的快捷方式编号: " rename_num
-        if [[ $rename_num =~ ^[0-9]+$ && $rename_num -ge 1 && $rename_num -lt $i ]]; then
+        if [[ $rename_num =~ ^[0-9]+$ && $rename_num -ge 1 && $rename_num -lt $i ]] && [ -n "${shortcut_map[$rename_num]}" ]; then
             IFS=':' read -r old_name script_path <<< "${shortcut_map[$rename_num]}"
             read -p "请输入新的快捷方式名称: " new_name
             if [ -n "$new_name" ] && [ "$new_name" != "$old_name" ]; then
@@ -877,11 +997,21 @@ uninstall_extension() {
     declare -A script_map
     
     for script_info in "${scripts[@]}"; do
-        IFS=':' read -r script_path script_desc <<< "$script_info"
-        echo "$i) $script_desc ($(basename "$script_path"))"
-        script_map[$i]="$script_path"
-        ((i++))
+        if [ -n "$script_info" ]; then
+            IFS=':' read -r script_path script_desc <<< "$script_info"
+            if [ -f "$script_path" ]; then
+                echo "$i) $script_desc ($(basename "$script_path"))"
+                script_map[$i]="$script_path"
+                ((i++))
+            fi
+        fi
     done
+    
+    if [ $i -eq 1 ]; then
+        print_warning "没有找到可卸载的扩展脚本"
+        press_enter
+        return
+    }
     
     echo "0) 返回上一级菜单"
     echo ""
@@ -891,7 +1021,7 @@ uninstall_extension() {
     if [[ $choice -eq 0 ]]; then
         uninstall_menu
         return
-    elif [[ $choice -ge 1 && $choice -lt $i ]]; then
+    elif [[ $choice -ge 1 && $choice -lt $i ]] && [ -n "${script_map[$choice]}" ]; then
         local script_path="${script_map[$choice]}"
         local script_name=$(basename "$script_path")
         
@@ -966,6 +1096,9 @@ EOF
 
 # 主菜单
 main_menu() {
+    # 初始化脚本路径映射
+    declare -A script_paths
+    
     while true; do
         print_title
         
@@ -985,10 +1118,14 @@ main_menu() {
             local i=7  # 从7开始，因为前面已经有6个选项
             
             for script_info in "${scripts[@]}"; do
-                IFS=':' read -r script_path script_desc <<< "$script_info"
-                echo "$i) $script_desc"
-                script_paths[$i]="$script_path"
-                ((i++))
+                if [ -n "$script_info" ]; then
+                    IFS=':' read -r script_path script_desc <<< "$script_info"
+                    if [ -f "$script_path" ]; then
+                        echo "$i) $script_desc"
+                        script_paths[$i]="$script_path"
+                        ((i++))
+                    fi
+                fi
             done
             echo ""
         fi
@@ -1011,7 +1148,7 @@ main_menu() {
                 exit 0
                 ;;
             *)
-                if [[ $choice -ge 7 && $choice -lt $i ]]; then
+                if [[ $choice -ge 7 && $choice -lt $i ]] && [ -n "${script_paths[$choice]}" ]; then
                     execute_script "${script_paths[$choice]}"
                 else
                     print_error "无效选项"
@@ -1036,11 +1173,20 @@ first_run() {
     fi
 }
 
+# 启用调试模式
+enable_debug() {
+    if [ "$1" = "debug" ]; then
+        DEBUG=true
+        print_debug "调试模式已启用"
+    fi
+}
+
 # 主函数
 main() {
+    enable_debug "$1"
     first_run
     main_menu
 }
 
 # 启动脚本
-main
+main "$@"
