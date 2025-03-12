@@ -2,7 +2,7 @@
 
 # ========================================
 # Termux集成脚本框架
-# 版本：1.0.2
+# 版本：1.0.3
 # ========================================
 
 # 颜色定义
@@ -19,7 +19,7 @@ SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
 REPO_URL="https://github.com/yourusername/termux-framework.git"
-VERSION="1.0.2"
+VERSION="1.0.3"
 
 # 确保目录存在
 mkdir -p "$SCRIPTS_DIR"
@@ -107,6 +107,23 @@ check_dependencies() {
     fi
 }
 
+# 配置Git以使用HTTPS且不提示认证
+configure_git_for_public_repos() {
+    # 确保Git已安装
+    if command -v git &> /dev/null; then
+        # 设置配置以避免认证提示
+        git config --global core.askPass ""
+        git config --global credential.helper ""
+        
+        # 确保REPO_URL使用HTTPS
+        if [[ "$REPO_URL" == git@* ]]; then
+            REPO_URL=$(echo "$REPO_URL" | sed -e 's|git@github.com:|https://github.com/|')
+            sed -i "s|REPO_URL=.*|REPO_URL=\"$REPO_URL\"|" "$CONFIG_FILE"
+            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+        fi
+    fi
+}
+
 # 更新框架
 update_framework() {
     print_info "正在更新框架..."
@@ -119,8 +136,21 @@ update_framework() {
         # 保存当前配置
         cp "$CONFIG_FILE" /tmp/termux_framework_config.tmp
         
-        # 获取最新代码
-        if git pull; then
+        # 确保使用HTTPS协议且不提示认证
+        git config --local core.askPass ""
+        git config --local credential.helper ""
+        
+        # 获取仓库URL并确保使用HTTPS
+        local current_remote=$(git config --get remote.origin.url)
+        if [[ "$current_remote" == git@* ]]; then
+            # 转换SSH格式到HTTPS格式
+            local https_url=$(echo "$current_remote" | sed -e 's|git@github.com:|https://github.com/|')
+            git remote set-url origin "$https_url"
+            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+        fi
+        
+        # 获取最新代码，不提示认证
+        if GIT_TERMINAL_PROMPT=0 git pull; then
             # 恢复配置（但保留可能的新设置）
             if [ -f /tmp/termux_framework_config.tmp ]; then
                 source /tmp/termux_framework_config.tmp
@@ -308,7 +338,22 @@ pull_repository_scripts() {
     
     if [ -d "$SCRIPTS_DIR/.git" ]; then
         cd "$SCRIPTS_DIR"
-        git pull
+        
+        # 确保使用HTTPS协议且不提示认证
+        git config --local core.askPass ""
+        git config --local credential.helper ""
+        
+        # 获取仓库URL并确保使用HTTPS
+        local current_remote=$(git config --get remote.origin.url)
+        if [[ "$current_remote" == git@* ]]; then
+            # 转换SSH格式到HTTPS格式
+            local https_url=$(echo "$current_remote" | sed -e 's|git@github.com:|https://github.com/|')
+            git remote set-url origin "$https_url"
+            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+        fi
+        
+        # 不提示输入认证信息
+        GIT_TERMINAL_PROMPT=0 git pull
     else
         # 假设脚本仓库可能与框架仓库不同
         read -p "请输入脚本仓库URL (直接回车使用默认): " scripts_repo
@@ -316,8 +361,15 @@ pull_repository_scripts() {
             scripts_repo="$REPO_URL"
         fi
         
+        # 确保使用HTTPS协议
+        if [[ "$scripts_repo" == git@* ]]; then
+            scripts_repo=$(echo "$scripts_repo" | sed -e 's|git@github.com:|https://github.com/|')
+            print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+        fi
+        
         rm -rf "$SCRIPTS_DIR"
-        git clone "$scripts_repo" "$SCRIPTS_DIR"
+        # 克隆时不提示输入认证信息
+        GIT_TERMINAL_PROMPT=0 git clone "$scripts_repo" "$SCRIPTS_DIR"
     fi
     
     # 确保所有脚本有执行权限
@@ -476,6 +528,9 @@ first_run() {
         
         # 检查依赖
         check_dependencies
+        
+        # 配置Git以使用HTTPS且不提示认证
+        configure_git_for_public_repos
         
         # 设置初始化完成标记
         touch "$SCRIPT_DIR/.initialized"
@@ -731,8 +786,15 @@ framework_update_menu() {
     # 创建临时目录
     local tmp_dir=$(mktemp -d)
     
-    # 克隆仓库以检查版本
-    if git clone --depth=1 "$REPO_URL" "$tmp_dir" &>/dev/null; then
+    # 确保REPO_URL使用HTTPS
+    if [[ "$REPO_URL" == git@* ]]; then
+        REPO_URL=$(echo "$REPO_URL" | sed -e 's|git@github.com:|https://github.com/|')
+        sed -i "s|REPO_URL=.*|REPO_URL=\"$REPO_URL\"|" "$CONFIG_FILE"
+        print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+    fi
+    
+    # 克隆仓库以检查版本，不提示认证
+    if GIT_TERMINAL_PROMPT=0 git clone --depth=1 "$REPO_URL" "$tmp_dir" &>/dev/null; then
         # 从克隆的仓库中提取版本
         local latest_version=$(grep "^VERSION=" "$tmp_dir/termux-framework.sh" | cut -d'"' -f2)
         
@@ -833,6 +895,11 @@ config_management() {
         1)
             read -p "请输入新的仓库URL: " new_repo
             if [ -n "$new_repo" ]; then
+                # 确保使用HTTPS协议
+                if [[ "$new_repo" == git@* ]]; then
+                    new_repo=$(echo "$new_repo" | sed -e 's|git@github.com:|https://github.com/|')
+                    print_info "已将仓库URL从SSH格式转换为HTTPS格式"
+                fi
                 sed -i "s|REPO_URL=.*|REPO_URL=\"$new_repo\"|" "$CONFIG_FILE"
                 print_success "仓库URL已更新"
             fi
