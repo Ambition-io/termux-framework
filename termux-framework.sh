@@ -56,22 +56,22 @@ print_title() {
 
 # 打印信息
 print_info() {
-    echo -e "${BLUE}[信息]${RESET} \$1"
+    echo -e "${BLUE}[信息]${RESET} $1"
 }
 
 # 打印成功
 print_success() {
-    echo -e "${GREEN}[成功]${RESET} \$1"
+    echo -e "${GREEN}[成功]${RESET} $1"
 }
 
 # 打印警告
 print_warning() {
-    echo -e "${YELLOW}[警告]${RESET} \$1"
+    echo -e "${YELLOW}[警告]${RESET} $1"
 }
 
 # 打印错误
 print_error() {
-    echo -e "${RED}[错误]${RESET} \$1"
+    echo -e "${RED}[错误]${RESET} $1"
 }
 
 # 按键继续
@@ -357,7 +357,7 @@ pull_repository_scripts() {
 
 # 执行选定的脚本
 execute_script() {
-    local script="\$1"
+    local script="$1"
     
     if [ -f "$script" ] && [ -x "$script" ]; then
         print_info "执行脚本: $(basename "$script")"
@@ -491,7 +491,7 @@ echo ""
 echo "感谢您使用本框架！"
 
 # 删除临时脚本（自己）
-rm -f "\$0"
+rm -f "$0"
 EOF
     
     chmod +x "$temp_script"
