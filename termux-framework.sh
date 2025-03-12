@@ -18,7 +18,7 @@ RESET="\033[0m"
 SCRIPT_DIR="$HOME/.termux-framework"
 SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 CONFIG_FILE="$SCRIPT_DIR/config.sh"
-REPO_URL="https://github.com/yourusername/termux-framework.git"
+REPO_URL="https://github.com/Ambition-io/termux-framework.git"
 VERSION="1.0.3"
 
 # 确保目录存在
