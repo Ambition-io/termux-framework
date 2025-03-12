@@ -123,9 +123,19 @@ configure_git_for_public_repos() {
 
 # 更新框架快捷链接
 update_framework_shortcut() {
+    # 检查快捷方式名称是否已存在
+    if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null && [ ! -L "$PREFIX/bin/$SHORTCUT_NAME" ] && [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" -o "$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME")" != "$SCRIPT_DIR/termux-framework.sh" ]; then
+        print_warning "命令 '$SHORTCUT_NAME' 已存在于系统中且不是指向本框架的链接。使用此名称可能会导致冲突。"
+        read -p "是否继续? (y/n): " continue_anyway
+        if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+            print_warning "框架快捷链接更新已取消"
+            return 1
+        fi
+    fi
+
     # 如果旧快捷链接存在且不同于新名称，先移除
-    if [ -n "\$1" ] && [ "\$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/\$1" ]; then
-        rm -f "$PREFIX/bin/\$1"
+    if [ -n "$1" ] && [ "$1" != "$SHORTCUT_NAME" ] && [ -f "$PREFIX/bin/$1" ]; then
+        rm -f "$PREFIX/bin/$1"
     fi
     
     # 创建快捷链接
@@ -703,6 +713,17 @@ create_script_shortcut() {
             shortcut_name="$script_name"
         fi
         
+        # 检查快捷方式名称是否已存在
+        if command -v "$shortcut_name" &> /dev/null; then
+            print_warning "命令 '$shortcut_name' 已存在于系统中。使用此名称可能会导致冲突。"
+            read -p "是否继续? (y/n): " continue_anyway
+            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                print_warning "快捷命令创建已取消"
+                press_enter
+                return
+            fi
+        fi
+        
         # 在bin中创建快捷方式
         cat > "$PREFIX/bin/$shortcut_name" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
@@ -835,6 +856,17 @@ EOF
             
             if [ -z "$new_name" ]; then
                 new_name="termux-framework"
+            fi
+            
+            # 检查快捷方式名称是否已存在
+            if command -v "$new_name" &> /dev/null && [ "$new_name" != "$SHORTCUT_NAME" ]; then
+                print_warning "命令 '$new_name' 已存在于系统中。使用此名称可能会导致冲突。"
+                read -p "是否继续? (y/n): " continue_anyway
+                if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                    print_warning "快捷名称修改已取消"
+                    press_enter
+                    return
+                fi
             fi
             
             # 保存旧快捷名称
