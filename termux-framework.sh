@@ -121,10 +121,10 @@ configure_git_for_public_repos() {
     fi
 }
 
-# 更新框架快捷链接
+# 更新框架快捷链接 - 修正后的函数
 update_framework_shortcut() {
     # 检查快捷方式名称是否已存在
-    if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null && [ ! -L "$PREFIX/bin/$SHORTCUT_NAME" ] && [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" -o "$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME")" != "$SCRIPT_DIR/termux-framework.sh" ]; then
+    if [ -n "$SHORTCUT_NAME" ] && command -v "$SHORTCUT_NAME" &> /dev/null && [ ! -L "$PREFIX/bin/$SHORTCUT_NAME" ] && [ ! -f "$PREFIX/bin/$SHORTCUT_NAME" -o "$(readlink -f "$PREFIX/bin/$SHORTCUT_NAME")" != "$0" ]; then
         print_warning "命令 '$SHORTCUT_NAME' 已存在于系统中且不是指向本框架的链接。使用此名称可能会导致冲突。"
         read -p "是否继续? (y/n): " continue_anyway
         if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
@@ -138,10 +138,10 @@ update_framework_shortcut() {
         rm -f "$PREFIX/bin/$1"
     fi
     
-    # 创建快捷链接
+    # 创建快捷链接 - 修正为直接指向当前脚本
     cat > "$PREFIX/bin/$SHORTCUT_NAME" << EOF
 #!/data/data/com.termux/files/usr/bin/bash
-exec "$SCRIPT_DIR/termux-framework.sh" "\$@"
+exec "$0" "\$@"
 EOF
     chmod +x "$PREFIX/bin/$SHORTCUT_NAME"
     
@@ -502,7 +502,7 @@ EOF
     exit 0
 }
 
-# 检查是否是首次运行
+# 检查是否是首次运行 - 修正后的函数
 first_run() {
     if [ ! -f "$SCRIPT_DIR/.initialized" ]; then
         print_title
