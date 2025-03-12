@@ -828,7 +828,7 @@ main_menu() {
             echo ""
         fi
         
-        read -p "请选择 [0-6"
+        echo -n "请选择 [0-6"
         if [ "$pinned_count" -gt 0 ]; then
             echo -n "-$((pinned_count+6))"
         fi
@@ -879,7 +879,7 @@ main_menu() {
             0) exit 0 ;;
             *)
                 # 检查是否选择了固定脚本
-                if [ -f "$pinned_file" ] && [ -s "$pinned_file" ]; then
+                if [ -f "$pinned_file" ] && [ -s "$pinned_file" ] && [ -n "$pinned_count" ]; then
                     local pinned_index=$((choice-6))
                     if [ $pinned_index -ge 1 ] && [ $pinned_index -le $pinned_count ]; then
                         local j=0
